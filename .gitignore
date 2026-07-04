@@ -1,0 +1,16 @@
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Never commit real Firebase secrets. The committed src/config/firebase.js holds
+# only placeholders; keep a real config in an ignored local override if you prefer.
+src/config/firebase.local.js
+.env
+.env.*
+!.env.example
