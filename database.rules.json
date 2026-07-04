@@ -1,0 +1,25 @@
+{
+  "rules": {
+    // ----------------------------------------------------------------------
+    // Realtime Database access for the Clothing & Footwear Shop Manager.
+    //
+    // Authentication is REQUIRED for every read and write — there are no open
+    // rules. By default access is further locked to the single shop-owner
+    // account (recommended). The Firebase config in src/config/firebase.js is
+    // public by design, so these rules are the only gate on the data.
+    //
+    // SETUP (do this once, before relying on the app):
+    //   1. Replace OWNER_EMAIL below with the owner's sign-in email.
+    //   2. Deploy:  firebase deploy --only database
+    //   (Firebase RTDB rules allow these // comments; they're stripped on deploy.)
+    //
+    // Prefer "any signed-in user" instead of a single owner? Replace both lines
+    // with:  ".read": "auth != null", ".write": "auth != null"
+    //
+    // Optional hardening: append  && auth.token.email_verified == true  to both
+    // lines once the owner's email is verified, to reject unverified sign-ins.
+    // ----------------------------------------------------------------------
+    ".read": "auth != null && auth.token.email == 'OWNER_EMAIL'",
+    ".write": "auth != null && auth.token.email == 'OWNER_EMAIL'"
+  }
+}

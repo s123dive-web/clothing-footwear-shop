@@ -1,0 +1,26 @@
+rules_version = '2';
+
+// Firebase Storage holds vendor/supplier-bill proof files under shop/bills/<billId>/<file>
+// (see src/lib/bills.js). Access requires authentication and is locked to the single shop-owner
+// account — these rules are the only gate, since the Firebase config is public.
+//
+// SETUP (do this once):
+//   1. Replace OWNER_EMAIL below with the owner's sign-in email.
+//   2. Deploy:  firebase deploy --only storage
+service firebase.storage {
+  match /b/{bucket}/o {
+    // Bill proofs: owner-only, and capped at 10 MB to match MAX_PROOF_BYTES.
+    match /shop/bills/{billId}/{fileName} {
+      allow read: if request.auth != null
+        && request.auth.token.email == 'OWNER_EMAIL';
+      allow write: if request.auth != null
+        && request.auth.token.email == 'OWNER_EMAIL'
+        && request.resource.size < 10 * 1024 * 1024;
+    }
+
+    // Everything else is denied.
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
