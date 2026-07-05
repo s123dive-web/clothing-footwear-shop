@@ -30,10 +30,6 @@ jobs:
       - run: npm run build
       - run: npm test
       - uses: actions/configure-pages@v5
-        with:
-          # Auto-create the Pages site (build type: GitHub Actions) on first run,
-          # so no manual Settings → Pages step is needed.
-          enablement: true
       - uses: actions/upload-pages-artifact@v3
         with:
           path: dist
