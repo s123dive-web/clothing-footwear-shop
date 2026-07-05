@@ -15,14 +15,16 @@ import { getAuth } from "firebase/auth";
 import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
 
+// For Firebase JS SDK v7.20.0 and later, measurementId is optional
 export const firebaseConfig = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.firebasedatabase.app",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID",
+  apiKey: "AIzaSyDkfM9RhnBD1XIxXkQHVXc4EJB57Xsetas",
+  authDomain: "vijayclothingfootwareshop.firebaseapp.com",
+  databaseURL: "https://vijayclothingfootwareshop-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "vijayclothingfootwareshop",
+  storageBucket: "vijayclothingfootwareshop.firebasestorage.app",
+  messagingSenderId: "1078004959031",
+  appId: "1:1078004959031:web:527c6bac23854485a1bcb2",
+  measurementId: "G-TM4M005MED"
 };
 
 // True once the placeholders above have been replaced with a real config. The app reads

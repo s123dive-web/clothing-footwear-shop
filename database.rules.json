@@ -19,7 +19,7 @@
     // Optional hardening: append  && auth.token.email_verified == true  to both
     // lines once the owner's email is verified, to reject unverified sign-ins.
     // ----------------------------------------------------------------------
-    ".read": "auth != null && auth.token.email == 'OWNER_EMAIL'",
-    ".write": "auth != null && auth.token.email == 'OWNER_EMAIL'"
+    ".read": "auth != null && auth.token.email == 'vijaykshopvarje@gmail.com'",
+    ".write": "auth != null && auth.token.email == 'vijaykshopvarje@gmail.com'"
   }
 }

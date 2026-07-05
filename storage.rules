@@ -12,9 +12,9 @@ service firebase.storage {
     // Bill proofs: owner-only, and capped at 10 MB to match MAX_PROOF_BYTES.
     match /shop/bills/{billId}/{fileName} {
       allow read: if request.auth != null
-        && request.auth.token.email == 'OWNER_EMAIL';
+        && request.auth.token.email == 'vijaykshopvarje@gmail.com';
       allow write: if request.auth != null
-        && request.auth.token.email == 'OWNER_EMAIL'
+        && request.auth.token.email == 'vijaykshopvarje@gmail.com'
         && request.resource.size < 10 * 1024 * 1024;
     }
 

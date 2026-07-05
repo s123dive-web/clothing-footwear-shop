@@ -103,9 +103,8 @@ Other slices: `sales`, `expenses`, `logs`, `vendorBills`, `dailyBills` (supplier
 - **Sales History** — date-range + text search; edit or delete a bill (restores the right
   variant's stock); reprint receipts.
 - **Udhari (Credit)**, **Add Expense**, **Vendor Bills** (with proof upload), **Supplier
-  Bills**, **Data Import** (txt/csv/xls/xlsx/pdf/json → products/sales/expenses), **Tag /
-  Barcode** creator, **Activity Log**, **Settings**, and a password-guarded **Admin** for bulk
-  operations.
+  Bills**, **Data Import** (txt/csv/xls/xlsx/pdf/json → products/sales/expenses), **Activity
+  Log**, **Settings**, and a password-guarded **Admin** for bulk operations.
 - **Mobile-friendly** — the sidebar collapses and grids stack on small screens for counter use.
 
 ## Settings (shop identity)
@@ -154,7 +153,7 @@ _Add screenshots here — e.g. Billing (variant picker), Inventory (size/colour 
 ## Libraries
 
 - **firebase** — Auth, Realtime Database (live sync), Storage.
-- **recharts** — charts. · **pdfjs-dist** — PDF import (lazy-loaded). · **jsbarcode** — tags.
+- **recharts** — charts. · **pdfjs-dist** — PDF import (lazy-loaded).
 - **xlsx (SheetJS)** — csv/xls/xlsx import + XLSX backups (patched CDN build).
 
 ## Deployment

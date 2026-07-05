@@ -1,14 +1,16 @@
 import { describe, it, expect, vi } from "vitest";
 
-// sync.js imports `db` from ./firebase.js (which would spin up the real Firebase SDK)
+// sync.js imports `db` from ../config/firebase.js (which would spin up the real Firebase SDK)
 // and live functions from firebase/database. The logic under test here is pure, so we
 // stub both — the tests never touch the network.
-vi.mock("./firebase.js", () => ({ db: {} }));
+vi.mock("../config/firebase.js", () => ({ db: {} }));
 vi.mock("firebase/database", () => ({
   ref: vi.fn(),
   onValue: vi.fn(),
   set: vi.fn(),
   update: vi.fn(),
+  runTransaction: vi.fn(),
+  get: vi.fn(),
 }));
 
 const { toMap, mapToArray, isLegacyShape, buildSliceUpdate, mergeRemote, sanitize } =
