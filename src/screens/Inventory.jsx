@@ -9,6 +9,7 @@ import {
 } from "../lib/catalog.js";
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, useRef, memo } from "react";
+import { useIsStaff } from "../config/role.js";
 import { labelsHtml } from "../lib/barcode.js";
 import { printHtml } from "../lib/print.js";
 import { featureOn } from "../config/features.js";
@@ -34,7 +35,7 @@ import { INR } from "../lib/format.js";
 
 // One product card. Memoised: while the owner types in the search box (or a toast appears) the
 // cards whose product object has not changed are not re-rendered.
-const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete, onLabels }) {
+const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete, onLabels, staff }) {
   const st = productStock(i);
   const low = isProductLow(i);
   return (
@@ -99,15 +100,19 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete, on
                 🏷 Labels
               </button>
             )}
-            <button className="btn small" onClick={() => onRestock(i)}>
-              Restock
-            </button>
-            <button className="btn small" onClick={() => onEdit(i)}>
-              Edit
-            </button>
-            <button className="btn small ghost" onClick={() => onDelete(i)}>
-              Delete
-            </button>
+            {!staff && (
+              <>
+                <button className="btn small" onClick={() => onRestock(i)}>
+                  Restock
+                </button>
+                <button className="btn small" onClick={() => onEdit(i)}>
+                  Edit
+                </button>
+                <button className="btn small ghost" onClick={() => onDelete(i)}>
+                  Delete
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -116,6 +121,7 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete, on
 });
 
 export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddCategory }) {
+  const staff = useIsStaff(); // staff look up stock; they do not change the catalogue
   const config = useShopConfig();
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("All"); // All | Clothing | Footwear | Accessories
@@ -231,9 +237,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         title="Inventory"
         sub={`${items.length} product${items.length === 1 ? "" : "s"} · tap a product to edit its variants`}
       >
-        <button className="btn primary" onClick={() => setForm(blankProduct())}>
-          + Add product
-        </button>
+        {!staff && (
+          <button className="btn primary" onClick={() => setForm(blankProduct())}>
+            + Add product
+          </button>
+        )}
       </Header>
 
       <div
@@ -292,9 +300,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
 
       {filtered.length === 0 ? (
         <Empty text={items.length === 0 ? "No products yet." : "No products match this filter."}>
-          <button className="btn primary" onClick={() => setForm(blankProduct())}>
-            + Add your first product
-          </button>
+          {!staff && (
+            <button className="btn primary" onClick={() => setForm(blankProduct())}>
+              + Add your first product
+            </button>
+          )}
         </Empty>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
@@ -306,6 +316,7 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
               onEdit={onEdit}
               onDelete={onDelete}
               onLabels={onLabels}
+              staff={staff}
             />
           ))}
           {filtered.length > limit && (

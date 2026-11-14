@@ -83,9 +83,29 @@ test("with no flag switched on, none of the Phase 4 features is visible or write
   const nav = page.locator("nav.nav");
   for (const tab of ["Day Close", "Customers", "Restock"])
     await expect(nav.getByRole("button", { name: tab })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "📷 Scan barcode" })).toHaveCount(0);
+  await expect(page.getByText(/Exchange credit/)).toHaveCount(0);
+  await gotoTab(page, "Sales History");
+  await page
+    .locator("main div")
+    .filter({ hasText: /·\s*1 item/ })
+    .last()
+    .click();
+  await expect(page.getByRole("button", { name: "↩ Return / exchange" })).toHaveCount(0);
+  await expect(page.getByRole("link", { name: /WhatsApp/ })).toHaveCount(0);
+  await gotoTab(page, "Inventory");
+  await expect(page.getByRole("button", { name: "🏷 Labels" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  await expect(page.getByLabel("HSN code")).toHaveCount(0);
+  await page.keyboard.press("Escape");
+  await expect(page.getByText(/Last backup/)).toHaveCount(0);
   await gotoTab(page, "Settings");
   await expect(page.getByText("Payment & receipt paper")).toHaveCount(0);
+  await gotoTab(page, "Admin");
+  await expect(page.getByText("Staff accounts")).toHaveCount(0);
   expect(await dbGet("shop/meta")).toEqual({ seeded: true });
+  expect(await dbGet("shop/users")).toBeNull();
+  expect(await dbGet("shop/dayCloses")).toBeNull();
 });
 
 test("paymentSettings: UPI ID and paper width are saved and used on the receipt", async ({

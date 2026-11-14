@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { RoleContext, STAFF_TABS, STAFF_SLICES, roleFrom } from "./config/role.js";
 import { featureOn, tabEnabled } from "./config/features.js";
 import { unnumbered, fyLabel } from "./lib/billNumbers.js";
 import { useLang, LangSelect } from "./i18n/index.jsx";
@@ -55,6 +56,7 @@ import {
   fetchAllSales,
   allocateBillNumber,
   subscribeMeta,
+  readOwnUser,
 } from "./lib/sync.js";
 import { backupStatus } from "./lib/backupReminder.js";
 import {
@@ -114,7 +116,55 @@ export default function App() {
     );
   }
   if (!user) return <Login />;
-  return <StoreManager user={user} onLogout={() => signOut(auth)} />;
+  return <RoleGate user={user} onLogout={() => signOut(auth)} />;
+}
+
+// With feature "staffAccounts" on, find out who this is before showing anything: the owner,
+// a staff member, or someone with a login but no place in this shop. With it off, everyone is
+// the owner — exactly as before.
+function RoleGate({ user, onLogout }) {
+  const on = featureOn("staffAccounts");
+  const [role, setRole] = useState(on ? null : "owner");
+  useEffect(() => {
+    if (!on) return;
+    let dead = false;
+    setRole(null);
+    readOwnUser(user.uid).then((r) => {
+      if (!dead) setRole(roleFrom(r));
+    });
+    return () => {
+      dead = true;
+    };
+  }, [on, user.uid]);
+  if (role === null)
+    return (
+      <div style={{ minHeight: "100vh", background: "#F3F6F3", padding: 24 }}>
+        <style>{CSS}</style>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <PageSkeleton label="Loading…" />
+        </div>
+      </div>
+    );
+  if (role === "none")
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 20 }}>
+        <style>{CSS}</style>
+        <div style={{ maxWidth: 420, textAlign: "center" }}>
+          <h1 style={{ fontSize: 20 }}>No access to this shop</h1>
+          <p style={{ color: "#445", lineHeight: 1.5 }}>
+            {user.email} is signed in, but the shop owner has not added this account as staff.
+          </p>
+          <button className="btn primary big" onClick={onLogout}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  return (
+    <RoleContext.Provider value={role}>
+      <StoreManager user={user} onLogout={onLogout} role={role} />
+    </RoleContext.Provider>
+  );
 }
 
 // ---------- main app ----------
@@ -181,9 +231,19 @@ const slugify = (s) =>
 // voidSaleOp → lib/sync.js sendOp), so the bill and its stock change are retried and replayed
 // together and a replay can never apply the stock change twice.
 
-function StoreManager({ user, onLogout }) {
+function StoreManager({ user, onLogout, role = "owner" }) {
   const { t } = useLang();
-  const [tab, setTab] = useState("dashboard");
+  const isStaff = role === "staff";
+  // Staff start on Billing and only ever see the staff tabs.
+  const [tab, setTabRaw] = useState(isStaff ? "billing" : "dashboard");
+  const tabAllowed = useCallback(
+    (k) => tabEnabled(k) && (!isStaff || STAFF_TABS.includes(k)),
+    [isStaff]
+  );
+  const setTab = useCallback(
+    (k) => setTabRaw(tabAllowed(k) ? k : isStaff ? "billing" : "dashboard"),
+    [tabAllowed, isStaff]
+  );
   const [otherOpen, setOtherOpen] = useState(false);
   // `rawItems` = products exactly as last received from the cloud (or the local cache).
   // `items` (below) = what every screen sees: rawItems + stock changes still in the outbox.
@@ -498,7 +558,9 @@ function StoreManager({ user, onLogout }) {
         salesEmit.current = null;
       };
     };
-    const unsubs = slices.map(([slice, setter]) => {
+    // A staff account subscribes only to what the rules let it read.
+    const mine = isStaff ? slices.filter(([slice]) => STAFF_SLICES.includes(slice)) : slices;
+    const unsubs = mine.map(([slice, setter]) => {
       const handle = makeHandler(slice, setter);
       if (slice === "sales" && WINDOW_FROM) return subscribeWindowedSales(handle);
       return subscribeSlice(slice, (v) => handle(v, false), onErr(slice));
@@ -511,7 +573,7 @@ function StoreManager({ user, onLogout }) {
       unsubs.forEach((u) => u());
       unsubConn();
     };
-  }, [loaded, WINDOW_FROM, setSalesFrom]);
+  }, [loaded, WINDOW_FROM, setSalesFrom, isStaff]);
 
   // Fetch older bills once (not live) and add them to what is loaded. `from` = the earliest
   // date wanted (rounded down to its month start); null = everything. Resolves true when the
@@ -815,9 +877,9 @@ function StoreManager({ user, onLogout }) {
       pushedCats.current.add(k);
       patch[CUSTOM_SUBCATS_PATH + "/" + subcatKey(c)] = c;
     }
-    if (Object.keys(patch).length)
+    if (Object.keys(patch).length && !isStaff)
       outboxRef.current?.enqueue({ id: uid(), patch, label: "subcategories" });
-  }, [cloudCats, customCats]);
+  }, [cloudCats, customCats, isStaff]);
 
   // Prompt for and add a new subcategory. Returns the canonical name to select (existing match if
   // it's a duplicate, the new name otherwise), or null if cancelled/blank. Used by the Add/Edit forms.
@@ -1012,7 +1074,7 @@ function StoreManager({ user, onLogout }) {
               </div>
             </div>
           </div>
-          {TOP_TABS.filter(([k]) => tabEnabled(k)).map(([k, ic, label]) => (
+          {TOP_TABS.filter(([k]) => tabAllowed(k)).map(([k, ic, label]) => (
             <button
               key={k}
               className={"navbtn" + (tab === k ? " active" : "")}
@@ -1040,7 +1102,7 @@ function StoreManager({ user, onLogout }) {
             {!showOther && alertCount > 0 && <span style={S.badge}>{alertCount}</span>}
           </button>
           {showOther &&
-            OTHER_TABS.filter(([k]) => tabEnabled(k)).map(([k, ic, label]) => (
+            OTHER_TABS.filter(([k]) => tabAllowed(k)).map(([k, ic, label]) => (
               <button
                 key={k}
                 className={"navbtn sub" + (tab === k ? " active" : "")}
@@ -1053,7 +1115,13 @@ function StoreManager({ user, onLogout }) {
                 {k === "alerts" && alertCount > 0 && <span style={S.badge}>{alertCount}</span>}
               </button>
             ))}
-          <div style={{ marginTop: "auto", padding: "8px 8px 4px" }}>
+          <div
+            style={{
+              marginTop: "auto",
+              padding: "8px 8px 4px",
+              display: isStaff ? "none" : undefined,
+            }}
+          >
             <div
               style={{
                 fontSize: 10.5,
@@ -1141,10 +1209,11 @@ function StoreManager({ user, onLogout }) {
             {user?.email ? (
               <>
                 {t("Signed in as {email}.", { email: user.email })}
+                {isStaff ? " (staff)" : ""}
                 <br />
               </>
             ) : null}
-            {t("Back up regularly.")}
+            {!isStaff && t("Back up regularly.")}
             <LangSelect
               style={{
                 marginTop: 8,
@@ -1162,7 +1231,7 @@ function StoreManager({ user, onLogout }) {
           <Suspense fallback={<PageSkeleton />}>
             {!loaded ? (
               <PageSkeleton label={t("Loading store data…")} />
-            ) : tab === "dashboard" ? (
+            ) : tab === "dashboard" && !isStaff ? (
               <Dashboard
                 items={items}
                 sales={sales}

@@ -1,5 +1,6 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useRef, useEffect, useMemo, lazy, Suspense } from "react";
+import { useIsStaff } from "../config/role.js";
 import { matchCode } from "../lib/barcode.js";
 import { creditToUse } from "../lib/returns.js";
 import { featureOn } from "../config/features.js";
@@ -52,6 +53,7 @@ export function Billing({
   exchangeCredit = null,
   setExchangeCredit,
 }) {
+  const staff = useIsStaff(); // staff do not see or enter cost prices
   const { t } = useLang();
   const config = useShopConfig();
   const [q, setQ] = useState("");
@@ -516,7 +518,6 @@ export function Billing({
           <input
             ref={searchRef}
             className="input"
-            aria-label="Search name / brand / code"
             placeholder={t("Search name / brand / code… (Enter opens top match)")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -552,7 +553,6 @@ export function Billing({
             <input
               className="input"
               style={{ flex: 1, minWidth: 0 }}
-              aria-label="Name (optional)"
               placeholder={t("Name (optional)")}
               value={miscName}
               onChange={(e) => setMiscName(e.target.value)}
@@ -561,23 +561,24 @@ export function Billing({
               }}
               aria-label="Misc item name"
             />
-            <input
-              className="input"
-              style={{ width: 78 }}
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              aria-label="buy"
-              placeholder={t("buy")}
-              value={miscBuy}
-              onChange={(e) => setMiscBuy(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") addMisc();
-              }}
-              aria-label="Misc buy price (optional)"
-              title="Buy / cost price (optional) — used for profit"
-            />
+            {!staff && (
+              <input
+                className="input"
+                style={{ width: 78 }}
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                placeholder={t("buy")}
+                value={miscBuy}
+                onChange={(e) => setMiscBuy(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addMisc();
+                }}
+                aria-label="Misc buy price (optional)"
+                title="Buy / cost price (optional) — used for profit"
+              />
+            )}
             <input
               className="input"
               style={{ width: 86 }}
@@ -585,7 +586,6 @@ export function Billing({
               inputMode="decimal"
               min="0"
               step="0.01"
-              aria-label="sell"
               placeholder={t("sell")}
               value={miscPrice}
               onChange={(e) => setMiscPrice(e.target.value)}
@@ -804,7 +804,6 @@ export function Billing({
               inputMode="decimal"
               min="0"
               step="0.01"
-              aria-label="0"
               placeholder="0"
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
@@ -965,7 +964,6 @@ export function Billing({
           <input
             className="input"
             style={{ marginBottom: 8 }}
-            aria-label="Mobile (optional)"
             placeholder={t("Mobile (optional)")}
             value={mobile}
             onChange={(e) => setMobile(e.target.value)}
@@ -980,7 +978,6 @@ export function Billing({
                 type="number"
                 inputMode="decimal"
                 min="0"
-                aria-label="Paid now (optional)"
                 placeholder={t("Paid now (optional)")}
                 value={paidNow}
                 onChange={(e) => setPaidNow(e.target.value)}

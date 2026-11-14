@@ -1,5 +1,6 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, memo, useEffect } from "react";
+import { useIsStaff } from "../config/role.js";
 import {
   buildReturn,
   canReturn,
@@ -138,6 +139,7 @@ const BillRow = memo(function BillRow({
   onDelete,
   waHref,
   onReturn,
+  staff,
 }) {
   return (
     <div>
@@ -176,7 +178,7 @@ const BillRow = memo(function BillRow({
         </span>
         <span>
           <b>{INR(s.total)}</b>{" "}
-          <span style={{ color: "#1B5E43", fontSize: 12 }}>(+{INR(s.profit)})</span>
+          {!staff && <span style={{ color: "#1B5E43", fontSize: 12 }}>(+{INR(s.profit)})</span>}
           {s.payment === "Udhari" && s.total - (s.paid || 0) > 0 && (
             <span
               style={{
@@ -272,20 +274,24 @@ const BillRow = memo(function BillRow({
                 🟢 WhatsApp
               </a>
             )}
-            {onReturn && canReturn(s) && (
+            {!staff && onReturn && canReturn(s) && (
               <button className="btn small" onClick={() => onReturn(s)}>
                 ↩ Return / exchange
               </button>
             )}
-            <button className="btn small ghost" onClick={() => onEdit(s)}>
-              ✎ Edit bill
-            </button>
-            <button className="btn small ghost" onClick={() => onSplit(s)}>
-              ✂ Split
-            </button>
-            <button className="btn small danger" onClick={() => onDelete(s)}>
-              🗑 Delete
-            </button>
+            {!staff && (
+              <>
+                <button className="btn small ghost" onClick={() => onEdit(s)}>
+                  ✎ Edit bill
+                </button>
+                <button className="btn small ghost" onClick={() => onSplit(s)}>
+                  ✂ Split
+                </button>
+                <button className="btn small danger" onClick={() => onDelete(s)}>
+                  🗑 Delete
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
@@ -311,6 +317,7 @@ export function SalesHistory({
   returnSale,
   setExchangeCredit,
 }) {
+  const staff = useIsStaff();
   const { t } = useLang();
   const config = useShopConfig();
   const [open, setOpen] = useState(null);
@@ -850,6 +857,7 @@ export function SalesHistory({
                   onDelete={onDelete}
                   waHref={waHref}
                   onReturn={onReturn}
+                  staff={staff}
                 />
               ))}
             {expanded && list.length > BILLS_PER_DATE && !fullDates.has(date) && (

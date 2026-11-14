@@ -255,3 +255,26 @@ export const subscribeMeta = (key, onData) =>
     (s) => onData(s.val()),
     () => {}
   );
+
+// Roles (feature "staffAccounts"): shop/users/<uid> = { role, email, addedAt }.
+// → { value } for a listed account, { value: null, owner: true } for the owner (no entry of
+// their own, but allowed to read the shop), { denied: true } for anyone else. Every account
+// may read its OWN entry, so a missing entry alone does not mean "owner" — the second read
+// (something only the owner or staff can see) settles it.
+export async function readOwnUser(uid) {
+  try {
+    const own = (await get(ref(db, "shop/users/" + uid))).val();
+    if (own) return { value: own };
+    await get(ref(db, "shop/meta/seeded"));
+    return { value: null, owner: true };
+  } catch {
+    return { denied: true };
+  }
+}
+export const subscribeUsers = (onData) =>
+  onValue(
+    ref(db, "shop/users"),
+    (s) => onData(s.val() || {}),
+    () => onData({})
+  );
+export const setUser = (uid, value) => set(ref(db, "shop/users/" + uid), value);
