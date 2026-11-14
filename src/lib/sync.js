@@ -27,6 +27,7 @@ import {
 } from "firebase/database";
 import { db } from "../config/firebase.js";
 import { applyStockOp, stockByProduct } from "./ops.js";
+import { allocateInCounter, formatBillNo } from "./billNumbers.js";
 
 export const SLICES = ["items", "sales", "expenses", "logs", "vendorBills", "dailyBills"];
 
@@ -226,3 +227,15 @@ export const subscribeUdhariSales = (onData, onError) =>
 export const fetchSalesRange = (from, to) =>
   get(query(salesRef(), orderByChild("date"), startAt(from), endAt(to))).then((s) => s.val());
 export const fetchAllSales = () => get(salesRef()).then((s) => s.val());
+
+// Hand out the next bill number of a financial year (see billNumbers.js). Resolves with the
+// formatted number, e.g. "2026-27/0007". Needs a connection — the caller only asks while online.
+export async function allocateBillNumber(fy, saleId) {
+  let n = null;
+  await runTransaction(ref(db, "shop/meta/billCounters/" + fy), (node) => {
+    const r = allocateInCounter(node, String(saleId));
+    n = r.n;
+    return r.node;
+  });
+  return formatBillNo(fy, n);
+}

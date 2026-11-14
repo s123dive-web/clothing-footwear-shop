@@ -162,6 +162,8 @@ export const CSS = `
   .btn.big { padding:13px 18px; font-size:15px; }
   .btn.ghost { background:transparent; border:1.5px solid #CFDCD1; }
   .btn.small { padding:5px 10px; font-size:12px; }
+  a.btn { display:inline-flex; align-items:center; justify-content:center; text-decoration:none; box-sizing:border-box; }
+  .btn.wa { background:#128C4A; color:#fff; }
   .btn.danger { background:#FBEAE7; color:#A8281E; }
   .pick { text-align:left; background:#F6FAF6; border:1.5px solid #DDE8DE; border-radius:11px; padding:10px 12px; cursor:pointer; font-family:inherit; }
   .pick:hover:not(:disabled) { border-color:#1B5E43; background:#fff; }

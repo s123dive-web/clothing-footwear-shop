@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { featureOn, tabEnabled } from "./config/features.js";
+import { unnumbered, fyLabel } from "./lib/billNumbers.js";
 import { useLang, LangSelect } from "./i18n/index.jsx";
 import { useDebouncedValue } from "./ui/hooks.js";
 import { syncSummary, syncText } from "./lib/syncStatus.js";
@@ -50,6 +52,7 @@ import {
   subscribeUdhariSales,
   fetchSalesRange,
   fetchAllSales,
+  allocateBillNumber,
 } from "./lib/sync.js";
 import {
   SALES_WINDOW_MONTHS,
@@ -109,15 +112,7 @@ export default function App() {
 }
 
 // ---------- main app ----------
-// Feature flags for deprecating a section from the live UI WITHOUT deleting its
-// code. A tab listed here as `false` is dropped from the sidebar and its render
-// branch is skipped; the component and all its logic stay intact below. To bring
-// a section back, flip its flag to `true` (or remove the line).
-const FEATURES = {
-  finance: false, // deprecated 2026 — kept for a possible future revival
-};
-// A tab is shown unless a flag explicitly turns it off.
-const tabEnabled = (k) => FEATURES[k] !== false;
+// Feature flags live in src/config/features.js.
 
 // Top-level sidebar destinations, plus the secondary group tucked under "Other".
 // Both feed the same `tab` switch below — grouping is purely a nav-rendering concern.
@@ -655,6 +650,33 @@ function StoreManager({ user, onLogout }) {
     },
     [commitSaleOp]
   );
+
+  // Bill numbers (feature "billNumbers"): every bill carrying a provisional number gets its
+  // real, sequential one as soon as this device is online — one at a time, oldest first, so
+  // the numbers follow the order the bills were made. Allocation is an idempotent cloud
+  // transaction; the number is then written onto the bill like any other edit (outbox).
+  const numbering = useRef(false);
+  useEffect(() => {
+    if (!featureOn("billNumbers") || !loaded || !online || numbering.current) return;
+    const next = unnumbered(sales)[0];
+    if (!next) return;
+    numbering.current = true;
+    allocateBillNumber(fyLabel(next.date), next.id)
+      .then((billNo) => {
+        setSales((all) =>
+          all.map((x) => {
+            if (x.id !== next.id || x.billNo) return x;
+            const numbered = { ...x, billNo };
+            delete numbered.billNoProv;
+            return numbered;
+          })
+        );
+      })
+      .catch((e) => console.error("bill number allocation failed", e))
+      .finally(() => {
+        numbering.current = false;
+      });
+  }, [sales, loaded, online]);
 
   // 4) Mirror to the device cache (instant next paint + offline reads). IndexedDB, one entry
   //    per record, only changed records are written — so there is no size ceiling and a single

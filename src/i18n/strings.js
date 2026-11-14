@@ -227,6 +227,8 @@ const T = {
   "Balance due: {amount}": ["बाकी: {amount}", "बाकी: {amount}"],
   "Scan to Pay · UPI": ["स्कैन करके भुगतान करें · UPI", "स्कॅन करून पैसे द्या · UPI"],
   Receipt: ["रसीद", "पावती"],
+  "Bill no: {no}": ["बिल नं: {no}", "बिल क्र: {no}"],
+  "Send on WhatsApp": ["WhatsApp पर भेजें", "WhatsApp वर पाठवा"],
 };
 
 export const STRINGS = {

@@ -1,5 +1,8 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, memo, useEffect } from "react";
+import { featureOn } from "../config/features.js";
+import { billNoText } from "../lib/billNumbers.js";
+import { waLink, receiptText } from "../lib/whatsapp.js";
 import { useLang } from "../i18n/index.jsx";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { money, INR, dateStr, todayStr, uid } from "../lib/format.js";
@@ -19,11 +22,15 @@ const BillRow = memo(function BillRow({
   onEdit,
   onSplit,
   onDelete,
+  waHref,
 }) {
   return (
     <div>
       <div style={{ ...S.row, cursor: "pointer" }} onClick={() => onToggle(s.id)}>
         <span>
+          {billNoText(s) && (
+            <b style={{ marginRight: 6, fontVariantNumeric: "tabular-nums" }}>#{billNoText(s)}</b>
+          )}
           {s.time} · {s.lines.length} item{s.lines.length > 1 ? "s" : ""}
           {searching && (
             <span style={{ marginLeft: 6, fontSize: 11, color: "#5C6E63" }}>
@@ -139,6 +146,16 @@ const BillRow = memo(function BillRow({
             <button className="btn small" onClick={() => onPrint(s)}>
               🖨 Print
             </button>
+            {waHref && (
+              <a
+                className="btn small wa"
+                href={waHref(s)}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                🟢 WhatsApp
+              </a>
+            )}
             <button className="btn small ghost" onClick={() => onEdit(s)}>
               ✎ Edit bill
             </button>
@@ -218,6 +235,8 @@ export function SalesHistory({
       s.customer,
       s.mobile,
       s.id,
+      s.billNo,
+      s.billNoProv,
       s.total,
       s.profit,
       s.paid,
@@ -245,6 +264,10 @@ export function SalesHistory({
   const [fullDates, setFullDates] = useState(() => new Set());
   const onToggle = useStableCallback((id) => setOpen((o) => (o === id ? null : id)));
   const onPrint = useStableCallback((s) => printReceipt(s, config, t));
+  const waLinkFor = useStableCallback((s) =>
+    waLink(s.mobile, receiptText(s, config, { t, money: INR }))
+  );
+  const waHref = featureOn("whatsappReceipt") ? waLinkFor : null;
   const onEdit = useStableCallback((s) => openEdit(s));
   const onSplit = useStableCallback((s) => openSplit(s));
   const onDelete = useStableCallback((s) => deleteSale(s));
@@ -664,6 +687,7 @@ export function SalesHistory({
                   onEdit={onEdit}
                   onSplit={onSplit}
                   onDelete={onDelete}
+                  waHref={waHref}
                 />
               ))}
             {expanded && list.length > BILLS_PER_DATE && !fullDates.has(date) && (

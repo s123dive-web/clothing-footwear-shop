@@ -1,5 +1,8 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useRef, useEffect, useMemo } from "react";
+import { featureOn } from "../config/features.js";
+import { provisionalNo } from "../lib/billNumbers.js";
+import { waLink, receiptText } from "../lib/whatsapp.js";
 import { useLang } from "../i18n/index.jsx";
 import { useDebouncedValue } from "../ui/hooks.js";
 import { todayStr, money, uid, INR } from "../lib/format.js";
@@ -332,6 +335,23 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       .slice(0, 8);
   }, [items, soldQty, lastSold]);
 
+  // The bill just made, as it is NOW in the synced list (so it carries its bill number once that
+  // has been allocated), falling back to the copy taken at the moment of sale.
+  const salesRef = useRef(sales);
+  salesRef.current = sales;
+  const liveSale = () =>
+    (lastSale && salesRef.current.find((x) => x.id === lastSale.id)) || lastSale;
+  const lastSaleLive = liveSale();
+  const printLast = async () => {
+    // Online, the real bill number arrives a moment after the sale — wait for it (briefly)
+    // rather than print a provisional one. Offline it prints provisional straight away.
+    if (featureOn("billNumbers") && online) {
+      for (let i = 0; i < 15 && liveSale()?.billNoProv && !liveSale()?.billNo; i++)
+        await new Promise((r) => setTimeout(r, 100));
+    }
+    printReceipt(liveSale(), config, t);
+  };
+
   const completeSale = () => {
     if (cart.length === 0 || soldCart.current === cart) return;
     // Re-check against the freshest variant stock (another device may have sold since).
@@ -389,6 +409,10 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       ...(mobile.trim() ? { mobile: mobile.trim() } : {}),
       ...(pay === "Udhari" ? { paid: Math.min(total, Math.max(0, money(+paidNow || 0))) } : {}),
       ...(pay === "Udhari" && +paidNow > 0 ? { paidMode } : {}),
+      // Feature "billNumbers": provisional now, the sequential number arrives once online.
+      ...(featureOn("billNumbers")
+        ? { billNoProv: provisionalNo(now.getTime()), createdAt: now.getTime() }
+        : {}),
     };
     // One outbox op = the bill + its stock decrement. It is recorded on this device at once and
     // delivered (and retried / replayed) in the background, so the counter never waits on the
@@ -912,13 +936,23 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           </div>
           <div className="bill-bar-spacer" />
           {lastSale && (
-            <button
-              className="btn"
-              style={{ width: "100%", marginTop: 8 }}
-              onClick={() => printReceipt(lastSale, config, t)}
-            >
+            <button className="btn" style={{ width: "100%", marginTop: 8 }} onClick={printLast}>
               {t("🧾 Print last receipt")}
             </button>
+          )}
+          {lastSale && featureOn("whatsappReceipt") && (
+            <a
+              className="btn wa"
+              style={{ width: "100%", marginTop: 8 }}
+              href={waLink(
+                lastSaleLive.mobile,
+                receiptText(lastSaleLive, config, { t, money: INR })
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              🟢 {t("Send on WhatsApp")}
+            </a>
           )}
         </section>
       </div>

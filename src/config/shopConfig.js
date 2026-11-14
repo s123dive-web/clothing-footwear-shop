@@ -32,6 +32,10 @@ export const DEFAULT_SHOP_CONFIG = {
   // Configurable footwear size range (IND/UK). Clothing sizes are a fixed labelled set.
   footwearSizeMin: 3,
   footwearSizeMax: 9,
+  // Optional (Phase 4, "paymentSettings"). Empty / 0 = behave exactly as before.
+  upiId: "", // shown under the payment QR and in WhatsApp receipts
+  paymentQrUrl: "", // uploaded QR image (data-URL); "" = the built-in public/payment-qr.jpg
+  receiptWidth: 0, // thermal paper width in mm: 58 or 80; 0 = the classic 280 px layout
 };
 
 const str = (v, fallback = "") => (v == null ? fallback : String(v));
@@ -58,6 +62,9 @@ export function normalizeConfig(raw) {
     receiptFooter: str(r.receiptFooter, DEFAULT_SHOP_CONFIG.receiptFooter),
     footwearSizeMin: Math.min(min, max),
     footwearSizeMax: Math.max(min, max),
+    upiId: str(r.upiId).trim(),
+    paymentQrUrl: str(r.paymentQrUrl),
+    receiptWidth: [58, 80].includes(Number(r.receiptWidth)) ? Number(r.receiptWidth) : 0,
   };
 }
 
