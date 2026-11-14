@@ -175,9 +175,24 @@ export const CSS = `
   .tbl th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:#7A8C81; padding:6px 8px; border-bottom:2px solid #E2EAE3; }
   .tbl td { padding:9px 8px; border-bottom:1px solid #EEF3EE; }
   .tbl tr:hover td { background:#F7FAF7; }
+  .tap { min-width:44px; min-height:44px; }
+  .stepper { display:flex; align-items:center; gap:4px; }
+  .step { width:44px; height:44px; border-radius:10px; border:1.5px solid #CFC3C9; background:#fff; color:#3A2A32; font-size:22px; font-weight:700; line-height:1; cursor:pointer; font-family:inherit; }
+  .step:active { background:#F1ECEF; }
+  .quick-row { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:6px; -webkit-overflow-scrolling:touch; }
+  .quick { flex:0 0 auto; min-height:44px; padding:0 12px; border-radius:22px; border:1.5px solid #E1D4DA; background:#FFF9EC; color:#3A2A32; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; font-family:inherit; }
+  .held { display:inline-flex; border:1.5px solid #D9C7CF; border-radius:10px; overflow:hidden; background:#fff; }
+  .held-main { min-height:44px; padding:0 12px; border:none; background:#FBF4F7; color:#5A2338; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; }
+  .held-x { min-width:44px; min-height:44px; border:none; border-left:1.5px solid #D9C7CF; background:#fff; color:#8A5566; font-size:14px; cursor:pointer; }
+  .bill-bar-total, .bill-bar-spacer { display:none; }
   .toasts { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:90; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(560px, calc(100vw - 24px)); }
   @media (max-width: 820px) {
     .toasts { bottom:calc(88px + env(safe-area-inset-bottom, 0px)); width:auto; left:12px; right:12px; transform:none; }
+    /* Billing: total + Complete pinned to the bottom of the phone screen */
+    .bill-bar { position:fixed; left:0; right:0; bottom:0; z-index:40; display:flex; align-items:center; gap:12px; background:#fff; border-top:1.5px solid #E1D4DA; box-shadow:0 -6px 18px rgba(0,0,0,.12); padding:10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); }
+    .bill-bar-total { display:flex; flex-direction:column; min-width:96px; line-height:1.25; }
+    .bill-bar .btn.big { min-height:52px; }
+    .bill-bar-spacer { display:block; height:76px; }
     .app { flex-direction:column !important; }
     .nav { width:auto !important; height:auto !important; position:static !important;
            flex-direction:row !important; flex-wrap:wrap !important; gap:4px !important; }

@@ -196,3 +196,91 @@ test("a warning toast stays until dismissed; an info toast goes away by itself",
   await warn.getByRole("button", { name: "Dismiss message" }).click();
   await expect(warn).toBeHidden();
 });
+
+// ---------------------------------------------------------------------------------------------
+// Billing ergonomics
+// ---------------------------------------------------------------------------------------------
+test("quantity steppers: + / − are 44 px targets and respect stock", async ({ page }) => {
+  await login(page);
+  await addProduct(page, KURTI);
+  await gotoTab(page, "Billing (POS)");
+  await addToCart(page, KURTI.name, "M · Red", 1);
+  const plus = page.getByRole("button", { name: "One more " + KURTI.name });
+  const minus = page.getByRole("button", { name: "One less " + KURTI.name });
+  const qty = page.getByLabel("Quantity for " + KURTI.name);
+  for (const b of [plus, minus]) {
+    const box = await b.boundingBox();
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
+  }
+  await plus.click();
+  await plus.click();
+  await expect(qty).toHaveValue("3");
+  await minus.click();
+  await expect(qty).toHaveValue("2");
+  for (let i = 0; i < 6; i++) await plus.click(); // only 5 in stock
+  await expect(qty).toHaveValue("5");
+  await expect(qty).toHaveAttribute("inputmode", "numeric");
+  await expect(page.getByLabel("Discount amount")).toHaveAttribute("inputmode", "decimal");
+});
+
+test("hold a bill, serve another customer, resume the first", async ({ page }) => {
+  await login(page);
+  await addProduct(page, KURTI);
+  await gotoTab(page, "Billing (POS)");
+  await addToCart(page, KURTI.name, "M · Red", 2);
+  await page.getByLabel("Customer name").fill("Waiting Customer");
+  await page.getByRole("button", { name: "⏸ Hold" }).click();
+  await expect(page.getByText("No items yet. Tap a product to begin.")).toBeVisible();
+  await expect(page.getByText("Held bills (1)")).toBeVisible();
+
+  // Second customer, completed while the first is on hold.
+  await addToCart(page, KURTI.name, "S · Red", 1);
+  await completeBtn(page).click();
+  await eventually(async () => expect(await records("sales")).toHaveLength(1));
+
+  // A reload does not lose the held bill.
+  await page.reload();
+  await gotoTab(page, "Billing (POS)");
+  await page.getByRole("button", { name: /▶ Waiting Customer · ₹1,000/ }).click();
+  await expect(page.getByLabel("Quantity for " + KURTI.name)).toHaveValue("2");
+  await expect(page.getByLabel("Customer name")).toHaveValue("Waiting Customer");
+  await expect(page.getByText("Held bills")).toHaveCount(0);
+  await completeBtn(page).click();
+  await eventually(async () => {
+    expect(await records("sales")).toHaveLength(2);
+    expect(await variantStock(KURTI.name)).toEqual({ "S|Red": 4, "M|Red": 3 });
+  });
+});
+
+test("quick-pick row offers recently sold products", async ({ page }) => {
+  await sellTwo(page);
+  const quick = page.getByLabel("Recent and best sellers").getByRole("button", {
+    name: new RegExp(KURTI.name),
+  });
+  await expect(quick).toBeVisible();
+  await quick.click();
+  await expect(page.getByRole("dialog", { name: new RegExp(KURTI.name) })).toBeVisible();
+});
+
+test.describe("phone", () => {
+  test.use({ viewport: { width: 390, height: 780 } });
+
+  test("total and Complete button stay pinned to the bottom of the screen", async ({ page }) => {
+    await login(page);
+    await addProduct(page, KURTI);
+    await gotoTab(page, "Billing (POS)");
+    await addToCart(page, KURTI.name, "M · Red", 2);
+    const bar = page.locator(".bill-bar");
+    await expect(bar).toHaveCSS("position", "fixed");
+    await expect(bar).toContainText("₹1,000");
+    for (const y of [0, 400, 5000]) {
+      await page.evaluate((top) => window.scrollTo(0, top), y);
+      const box = await completeBtn(page).boundingBox();
+      expect(box.y + box.height).toBeLessThanOrEqual(780);
+      expect(box.y).toBeGreaterThan(780 - 120);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await completeBtn(page).click();
+    await eventually(async () => expect(await records("sales")).toHaveLength(1));
+  });
+});

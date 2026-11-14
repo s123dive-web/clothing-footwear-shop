@@ -322,6 +322,7 @@ export function DailyBills({
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="any"
                 value={form.qty}
@@ -333,6 +334,7 @@ export function DailyBills({
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={form.unitPrice}
@@ -386,6 +388,7 @@ export function DailyBills({
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={autoTotal > 0 ? autoTotal : form.billAmount}
@@ -430,6 +433,7 @@ export function DailyBills({
                 <input
                   className="input"
                   type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.01"
                   value={form.paidAmount}

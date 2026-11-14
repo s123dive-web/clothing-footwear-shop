@@ -359,6 +359,7 @@ export function RestockModal({ product, onRestock, onClose }) {
                 className="input"
                 style={{ width: 90 }}
                 type="number"
+                inputMode="decimal"
                 min="1"
                 placeholder="+ qty"
                 value={qty[v.id] || ""}
@@ -563,6 +564,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={f.purchasePrice}
@@ -574,6 +576,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={f.sellingPrice}
@@ -584,6 +587,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={f.mrp}
@@ -594,6 +598,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             max="100"
             step="0.1"
@@ -717,6 +722,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                     className="input"
                     style={{ padding: "5px 7px", width: 64 }}
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     value={v.stockQty}
                     onChange={(e) => setVar(v.id, "stockQty", e.target.value)}
@@ -727,6 +733,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                     className="input"
                     style={{ padding: "5px 7px", width: 56 }}
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     value={v.lowAt}
                     onChange={(e) => setVar(v.id, "lowAt", e.target.value)}

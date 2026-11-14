@@ -175,6 +175,7 @@ export function Settings({ config, onSave, notify }) {
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="1"
                 max="15"
                 value={f.footwearSizeMin}
@@ -185,6 +186,7 @@ export function Settings({ config, onSave, notify }) {
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="1"
                 max="15"
                 value={f.footwearSizeMax}

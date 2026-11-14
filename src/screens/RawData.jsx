@@ -394,6 +394,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.amount}
@@ -477,6 +478,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 6px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             value={r.qty}
                             onChange={(e) => edit(i, "qty", +e.target.value)}
@@ -487,6 +489,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.buyPrice}
@@ -498,6 +501,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.sellPrice}
@@ -550,6 +554,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             value={r.qty}
                             onChange={(e) => edit(i, "qty", +e.target.value)}
@@ -560,6 +565,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.amount}

@@ -739,6 +739,7 @@ export function SalesHistory({
                       className="input"
                       style={{ padding: "6px 8px" }}
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       value={l.qty}
                       onChange={(e) => editLine(idx, +e.target.value)}
@@ -764,6 +765,7 @@ export function SalesHistory({
             <input
               className="input"
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
               max={editSubtotal}
@@ -818,6 +820,7 @@ export function SalesHistory({
                     className="input"
                     style={{ flex: 1 }}
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     step="0.01"
                     max={editTotal}
@@ -948,6 +951,7 @@ export function SalesHistory({
                   <td>
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       step="0.01"
                       className="input"

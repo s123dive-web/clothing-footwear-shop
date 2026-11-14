@@ -292,6 +292,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={form.amount}
@@ -327,6 +328,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                 <input
                   className="input"
                   type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.01"
                   value={form.paidAmount}

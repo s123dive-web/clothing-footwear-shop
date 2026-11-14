@@ -483,6 +483,7 @@ export function Udhari({ sales, setSales, notify, log }) {
                   className="input"
                   style={{ flex: 1 }}
                   type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.01"
                   max={payOut}

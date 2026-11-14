@@ -109,6 +109,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={exp.amount}
@@ -195,6 +196,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                           className="input"
                           style={{ padding: "6px 8px", textAlign: "right" }}
                           type="number"
+                          inputMode="decimal"
                           min="0"
                           step="0.01"
                           value={editing.amount}
