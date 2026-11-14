@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { usePagedLimit } from "../ui/hooks.js";
 import { Header, Empty } from "../ui/index.jsx";
 import { todayStr } from "../lib/format.js";
 import { LOG_TYPES } from "../lib/domain.js";
@@ -21,6 +22,7 @@ export function Logs({ logs, setLogs, notify }) {
   const filtered = logs.filter(
     (l) => (!date || l.date === date) && (type === "all" || l.type === type)
   );
+  const [limit, showMore] = usePagedLimit(200, date + "|" + type);
 
   const clear = () => {
     if (
@@ -103,7 +105,7 @@ export function Logs({ logs, setLogs, notify }) {
               </tr>
             </thead>
             <tbody>
-              {filtered.map((l) => (
+              {filtered.slice(0, limit).map((l) => (
                 <tr key={l.id}>
                   <td style={{ whiteSpace: "nowrap", color: "#677" }}>
                     {l.date} <span style={{ color: "#9AA" }}>{l.time}</span>
@@ -125,6 +127,15 @@ export function Logs({ logs, setLogs, notify }) {
               ))}
             </tbody>
           </table>
+        )}
+        {filtered.length > limit && (
+          <button
+            className="btn"
+            style={{ display: "block", margin: "12px auto 0" }}
+            onClick={showMore}
+          >
+            Show more ({filtered.length - limit} older events)
+          </button>
         )}
       </section>
     </div>

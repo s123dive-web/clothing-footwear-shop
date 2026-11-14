@@ -9,6 +9,36 @@ export const LOGO_SRC = BASE + "logo.jpg";
 export const PAYMENT_QR_SRC = BASE + "payment-qr.jpg";
 export const assetUrl = (p) => (typeof location !== "undefined" ? location.origin : "") + p;
 
+// How long printing will wait for receipt images before going ahead without them.
+export const PRINT_IMAGE_WAIT_MS = 2500;
+
+// Resolves when every image has finished (loaded + decoded, or failed), or after `capMs`.
+export function whenImagesReady(imgs, capMs = PRINT_IMAGE_WAIT_MS) {
+  const one = (img) => {
+    if (img.complete && img.naturalWidth === 0) return Promise.resolve(); // already failed
+    const settled = img.complete
+      ? Promise.resolve()
+      : new Promise((res) => {
+          img.addEventListener("load", res, { once: true });
+          img.addEventListener("error", res, { once: true });
+        });
+    return settled.then(() => (img.decode ? img.decode().catch(() => {}) : undefined));
+  };
+  const cap = new Promise((res) => setTimeout(res, capMs));
+  return Promise.race([Promise.all([...imgs].map(one)), cap]);
+}
+
+// Warm the browser cache with the images a receipt needs, so the first print of the day does
+// not wait on the network. Called when the Billing screen opens.
+export function preloadReceiptAssets(config) {
+  if (typeof Image === "undefined") return;
+  for (const src of [(config && config.logoUrl) || assetUrl(LOGO_SRC), assetUrl(PAYMENT_QR_SRC)]) {
+    const img = new Image();
+    img.decoding = "async";
+    img.src = src;
+  }
+}
+
 // Print an HTML document via a hidden iframe. Mobile browsers block window.open popups,
 // so the old "open a new window and print" approach silently failed on phones — an iframe
 // prints from within the current page (the click is a user gesture) and works everywhere.
@@ -35,25 +65,35 @@ export function printHtml(html, title) {
     }
   };
 
-  iframe.onload = () => {
-    // Small delay so logo/QR images finish painting before the print dialog opens.
-    setTimeout(() => {
-      try {
-        const win = iframe.contentWindow;
-        win.focus();
-        win.onafterprint = cleanup;
-        win.print();
-        setTimeout(cleanup, 60000); // safety net: afterprint doesn't fire on every mobile browser
-      } catch (err) {
-        console.error("print failed", err);
-        cleanup();
-        const w = window.open("", "_blank"); // last-ditch fallback
-        if (w) {
-          w.document.write(html);
-          w.document.close();
-        }
+  const doPrint = () => {
+    try {
+      const win = iframe.contentWindow;
+      win.focus();
+      win.onafterprint = cleanup;
+      win.print();
+      setTimeout(cleanup, 60000); // safety net: afterprint doesn't fire on every mobile browser
+    } catch (err) {
+      console.error("print failed", err);
+      cleanup();
+      const w = window.open("", "_blank"); // last-ditch fallback
+      if (w) {
+        w.document.write(html);
+        w.document.close();
       }
-    }, 250);
+    }
+  };
+
+  iframe.onload = () => {
+    // Print once the logo / payment QR are actually decoded — not after a guessed delay. Each
+    // image settles on load, error (it hides itself) or decode; a cap keeps a dead image URL
+    // from holding the receipt up.
+    let imgs = [];
+    try {
+      imgs = [...iframe.contentDocument.images];
+    } catch {
+      /* cross-origin / detached — just print */
+    }
+    whenImagesReady(imgs, PRINT_IMAGE_WAIT_MS).then(doPrint);
   };
 
   document.body.appendChild(iframe);

@@ -1,12 +1,13 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useRef, useEffect, useMemo } from "react";
+import { useDebouncedValue } from "../ui/hooks.js";
 import { todayStr, money, uid, INR } from "../lib/format.js";
 import { productStock, variantLabel, isProductLow } from "../lib/products.js";
 import { iconFor } from "../lib/domain.js";
 import { Header, Empty, Modal } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 import { CURRENCY } from "../config/currency.js";
-import { printReceipt } from "../lib/print.js";
+import { printReceipt, preloadReceiptAssets } from "../lib/print.js";
 
 // ---------- Billing / POS ----------
 export function Billing({ items, sales, recordSale, online, notify, log }) {
@@ -29,6 +30,8 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
   const [custFocus, setCustFocus] = useState(false);
   const searchRef = useRef(null);
   useEffect(() => searchRef.current?.focus(), []);
+  // Have the receipt's logo and payment QR ready before the first bill is printed.
+  useEffect(() => preloadReceiptAssets(config), [config]);
   // Double-tap guard: a cart can be turned into a bill exactly once. `soldCart` remembers the
   // cart array that was just saved, so a second tap that arrives before React has re-rendered
   // the (now empty) cart is ignored; `saving` also disables the button for that moment.
@@ -83,8 +86,8 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
   const stockOf = (p) => productStock(p);
 
   // Product picker results: sellable (any variant in stock) products first, then out-of-stock.
-  const results = useMemo(() => {
-    const s = q.trim().toLowerCase();
+  const findProducts = (query) => {
+    const s = query.trim().toLowerCase();
     const matchesText = (i) =>
       i.name.toLowerCase().includes(s) ||
       (i.brand || "").toLowerCase().includes(s) ||
@@ -101,7 +104,12 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
     const inStock = pool.filter((i) => stockOf(i) > 0).sort(byActivity);
     const out = pool.filter((i) => stockOf(i) <= 0).sort(byActivity);
     return [...inStock.slice(0, 14), ...out.slice(0, 8)];
-  }, [q, items, soldQty, lastSold]);
+  };
+  // The grid follows the search box after a short pause; Enter (a barcode scanner types fast
+  // and then sends Enter) always searches the text exactly as typed — see onSearchKey.
+  const dq = useDebouncedValue(q);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const results = useMemo(() => findProducts(dq), [dq, items, soldQty, lastSold]);
 
   // Live availability of a variant, minus what's already in the cart for it.
   const variantAvail = (product, variant) => {
@@ -199,10 +207,12 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
   };
 
   const onSearchKey = (e) => {
-    if (e.key !== "Enter" || results.length === 0) return;
+    if (e.key !== "Enter") return;
+    const list = q === dq ? results : findProducts(q);
+    if (list.length === 0) return;
     const code = q.trim().toLowerCase();
-    const exact = results.find((i) => (i.code || "").toLowerCase() === code && code);
-    openProduct(exact || results[0]);
+    const exact = list.find((i) => (i.code || "").toLowerCase() === code && code);
+    openProduct(exact || list[0]);
     setQ("");
   };
 

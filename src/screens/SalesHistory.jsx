@@ -1,10 +1,161 @@
 import { useShopConfig } from "../config/shopConfig.js";
-import { useState, useMemo } from "react";
+import { useState, useMemo, memo } from "react";
+import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { money, INR, dateStr, todayStr, uid } from "../lib/format.js";
 import { Header, Empty, Modal, Field } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 import { PAY_COLORS } from "../lib/domain.js";
 import { printReceipt, lineVariantText } from "../lib/print.js";
+
+// One bill row (+ its expanded detail). Memoised so typing in the search box, opening another
+// bill or a toast does not re-render every bill on screen.
+const BillRow = memo(function BillRow({
+  s,
+  isOpen,
+  searching,
+  onToggle,
+  onPrint,
+  onEdit,
+  onSplit,
+  onDelete,
+}) {
+  return (
+    <div>
+      <div style={{ ...S.row, cursor: "pointer" }} onClick={() => onToggle(s.id)}>
+        <span>
+          {s.time} · {s.lines.length} item{s.lines.length > 1 ? "s" : ""}
+          {searching && (
+            <span style={{ marginLeft: 6, fontSize: 11, color: "#8A9C90" }}>
+              {new Date(s.date + "T00:00").toLocaleDateString("en-IN", {
+                day: "numeric",
+                month: "short",
+              })}
+            </span>
+          )}
+          {s.payment && (
+            <span
+              style={{
+                marginLeft: 8,
+                fontSize: 10.5,
+                fontWeight: 800,
+                color: PAY_COLORS[s.payment] || "#789",
+                border: `1px solid ${PAY_COLORS[s.payment] || "#bbb"}`,
+                borderRadius: 6,
+                padding: "0 6px",
+              }}
+            >
+              {s.payment}
+              {s.customer ? " · " + s.customer : ""}
+              {s.mobile ? " · " + s.mobile : ""}
+            </span>
+          )}
+        </span>
+        <span>
+          <b>{INR(s.total)}</b>{" "}
+          <span style={{ color: "#1B5E43", fontSize: 12 }}>(+{INR(s.profit)})</span>
+          {s.payment === "Udhari" && s.total - (s.paid || 0) > 0 && (
+            <span
+              style={{
+                color: "#C44536",
+                fontSize: 11.5,
+                fontWeight: 700,
+                marginLeft: 6,
+              }}
+            >
+              {INR(money(s.total - (s.paid || 0)))} due
+            </span>
+          )}{" "}
+          {isOpen ? "▾" : "▸"}
+        </span>
+      </div>
+      {(isOpen || searching) && (
+        <div
+          style={{
+            background: "#F4F7F4",
+            borderRadius: 8,
+            padding: "8px 12px",
+            margin: "0 0 8px",
+          }}
+        >
+          {s.lines.map((l, i) => (
+            <div
+              key={i}
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontSize: 12.5,
+                padding: "3px 0",
+              }}
+            >
+              <span>
+                {l.name} × {l.qty}
+              </span>
+              <span>{INR(l.amount)}</span>
+            </div>
+          ))}
+          {s.discount > 0 && (
+            <div style={{ borderTop: "1px dashed #D8E0D8", marginTop: 4, paddingTop: 4 }}>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12.5,
+                  padding: "2px 0",
+                  color: "#6B7E74",
+                }}
+              >
+                <span>Subtotal</span>
+                <span>{INR(s.subtotal != null ? s.subtotal : money(s.total + s.discount))}</span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 12.5,
+                  padding: "2px 0",
+                  color: "#C44536",
+                  fontWeight: 600,
+                }}
+              >
+                <span>Discount{s.discountPct ? ` (${s.discountPct}%)` : ""}</span>
+                <span>−{INR(s.discount)}</span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                  padding: "2px 0",
+                  fontWeight: 800,
+                }}
+              >
+                <span>Total</span>
+                <span>{INR(s.total)}</span>
+              </div>
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+            <button className="btn small" onClick={() => onPrint(s)}>
+              🖨 Print
+            </button>
+            <button className="btn small ghost" onClick={() => onEdit(s)}>
+              ✎ Edit bill
+            </button>
+            <button className="btn small ghost" onClick={() => onSplit(s)}>
+              ✂ Split
+            </button>
+            <button className="btn small danger" onClick={() => onDelete(s)}>
+              🗑 Delete
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+});
+
+const BILLS_PER_DATE = 200; // a single day rarely has more; beyond this, show on request
+const DATES_PER_PAGE = 60;
 
 export function SalesHistory({ sales, items, setSales, amendSale, voidSale, notify, log }) {
   const config = useShopConfig();
@@ -23,7 +174,8 @@ export function SalesHistory({ sales, items, setSales, amendSale, voidSale, noti
 
   // Search matches a bill when EVERY space-separated term is found somewhere in it —
   // item names, customer, mobile, payment, date/time, bill id, or any amount/quantity.
-  const terms = q.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const dq = useDebouncedValue(q, 200);
+  const terms = dq.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const searching = terms.length > 0;
   const matchSale = (s) => {
     if (!searching) return true;
@@ -56,6 +208,14 @@ export function SalesHistory({ sales, items, setSales, amendSale, voidSale, noti
     return Object.entries(m).sort((a, b) => (a[0] < b[0] ? 1 : -1));
   }, [visible]);
   const rangeTotal = money(visible.reduce((a, s) => a + s.total, 0));
+  // Long histories: 60 date groups at a time, and at most 200 bills of one day until asked.
+  const [dateLimit, showMoreDates] = usePagedLimit(DATES_PER_PAGE, dq + "|" + from + "|" + to);
+  const [fullDates, setFullDates] = useState(() => new Set());
+  const onToggle = useStableCallback((id) => setOpen((o) => (o === id ? null : id)));
+  const onPrint = useStableCallback((s) => printReceipt(s, config));
+  const onEdit = useStableCallback((s) => openEdit(s));
+  const onSplit = useStableCallback((s) => openSplit(s));
+  const onDelete = useStableCallback((s) => deleteSale(s));
 
   // Bill edits and deletes go through amendSale / voidSale (StoreManager): the bill change and
   // the per-variant stock correction are ONE outbox op, so they cannot drift apart, failures
@@ -402,7 +562,7 @@ export function SalesHistory({ sales, items, setSales, amendSale, voidSale, noti
           />
         </section>
       )}
-      {byDate.map(([date, list]) => {
+      {byDate.slice(0, dateLimit).map(([date, list]) => {
         const isToday = date === todayStr();
         // Today is always open; every other date collapses (closed by default) so the list scans
         // quickly. While searching, open every matching date so the results are all visible.
@@ -434,149 +594,40 @@ export function SalesHistory({ sales, items, setSales, amendSale, voidSale, noti
               </span>
             </div>
             {expanded &&
-              list.map((s) => (
-                <div key={s.id}>
-                  <div
-                    style={{ ...S.row, cursor: "pointer" }}
-                    onClick={() => setOpen(open === s.id ? null : s.id)}
-                  >
-                    <span>
-                      {s.time} · {s.lines.length} item{s.lines.length > 1 ? "s" : ""}
-                      {searching && (
-                        <span style={{ marginLeft: 6, fontSize: 11, color: "#8A9C90" }}>
-                          {new Date(s.date + "T00:00").toLocaleDateString("en-IN", {
-                            day: "numeric",
-                            month: "short",
-                          })}
-                        </span>
-                      )}
-                      {s.payment && (
-                        <span
-                          style={{
-                            marginLeft: 8,
-                            fontSize: 10.5,
-                            fontWeight: 800,
-                            color: PAY_COLORS[s.payment] || "#789",
-                            border: `1px solid ${PAY_COLORS[s.payment] || "#bbb"}`,
-                            borderRadius: 6,
-                            padding: "0 6px",
-                          }}
-                        >
-                          {s.payment}
-                          {s.customer ? " · " + s.customer : ""}
-                          {s.mobile ? " · " + s.mobile : ""}
-                        </span>
-                      )}
-                    </span>
-                    <span>
-                      <b>{INR(s.total)}</b>{" "}
-                      <span style={{ color: "#1B5E43", fontSize: 12 }}>(+{INR(s.profit)})</span>
-                      {s.payment === "Udhari" && s.total - (s.paid || 0) > 0 && (
-                        <span
-                          style={{
-                            color: "#C44536",
-                            fontSize: 11.5,
-                            fontWeight: 700,
-                            marginLeft: 6,
-                          }}
-                        >
-                          {INR(money(s.total - (s.paid || 0)))} due
-                        </span>
-                      )}{" "}
-                      {open === s.id ? "▾" : "▸"}
-                    </span>
-                  </div>
-                  {(open === s.id || searching) && (
-                    <div
-                      style={{
-                        background: "#F4F7F4",
-                        borderRadius: 8,
-                        padding: "8px 12px",
-                        margin: "0 0 8px",
-                      }}
-                    >
-                      {s.lines.map((l, i) => (
-                        <div
-                          key={i}
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            fontSize: 12.5,
-                            padding: "3px 0",
-                          }}
-                        >
-                          <span>
-                            {l.name} × {l.qty}
-                          </span>
-                          <span>{INR(l.amount)}</span>
-                        </div>
-                      ))}
-                      {s.discount > 0 && (
-                        <div
-                          style={{ borderTop: "1px dashed #D8E0D8", marginTop: 4, paddingTop: 4 }}
-                        >
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              fontSize: 12.5,
-                              padding: "2px 0",
-                              color: "#6B7E74",
-                            }}
-                          >
-                            <span>Subtotal</span>
-                            <span>
-                              {INR(s.subtotal != null ? s.subtotal : money(s.total + s.discount))}
-                            </span>
-                          </div>
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              fontSize: 12.5,
-                              padding: "2px 0",
-                              color: "#C44536",
-                              fontWeight: 600,
-                            }}
-                          >
-                            <span>Discount{s.discountPct ? ` (${s.discountPct}%)` : ""}</span>
-                            <span>−{INR(s.discount)}</span>
-                          </div>
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              fontSize: 13,
-                              padding: "2px 0",
-                              fontWeight: 800,
-                            }}
-                          >
-                            <span>Total</span>
-                            <span>{INR(s.total)}</span>
-                          </div>
-                        </div>
-                      )}
-                      <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                        <button className="btn small" onClick={() => printReceipt(s, config)}>
-                          🖨 Print
-                        </button>
-                        <button className="btn small ghost" onClick={() => openEdit(s)}>
-                          ✎ Edit bill
-                        </button>
-                        <button className="btn small ghost" onClick={() => openSplit(s)}>
-                          ✂ Split
-                        </button>
-                        <button className="btn small danger" onClick={() => deleteSale(s)}>
-                          🗑 Delete
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+              (fullDates.has(date) ? list : list.slice(0, BILLS_PER_DATE)).map((s) => (
+                <BillRow
+                  key={s.id}
+                  s={s}
+                  isOpen={open === s.id}
+                  searching={searching}
+                  onToggle={onToggle}
+                  onPrint={onPrint}
+                  onEdit={onEdit}
+                  onSplit={onSplit}
+                  onDelete={onDelete}
+                />
               ))}
+            {expanded && list.length > BILLS_PER_DATE && !fullDates.has(date) && (
+              <button
+                className="btn small"
+                style={{ marginTop: 8 }}
+                onClick={() => setFullDates((d) => new Set(d).add(date))}
+              >
+                Show all {list.length} bills of this day
+              </button>
+            )}
           </section>
         );
       })}
+      {byDate.length > dateLimit && (
+        <button
+          className="btn"
+          style={{ display: "block", margin: "0 auto 14px" }}
+          onClick={showMoreDates}
+        >
+          Show older dates ({byDate.length - dateLimit} more)
+        </button>
+      )}
 
       {editing && (
         <Modal title="Edit bill" onClose={() => setEditing(null)}>

@@ -8,7 +8,8 @@ import {
   COLOR_SWATCHES,
 } from "../lib/catalog.js";
 import { useShopConfig } from "../config/shopConfig.js";
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, memo } from "react";
+import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { normName, iconFor } from "../lib/domain.js";
 import {
   cloudWriteProduct,
@@ -26,6 +27,84 @@ import {
 import { S } from "../ui/styles.js";
 import { INR } from "../lib/format.js";
 
+// One product card. Memoised: while the owner types in the search box (or a toast appears) the
+// cards whose product object has not changed are not re-rendered.
+const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) {
+  const st = productStock(i);
+  const low = isProductLow(i);
+  return (
+    <section style={{ ...S.panel, padding: 14, borderColor: low ? "#F0CDD6" : "#E2EAE3" }}>
+      <div style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}>
+        <div style={{ fontSize: 26, lineHeight: 1 }}>
+          {i.imageUrl ? (
+            <img
+              loading="lazy"
+              src={i.imageUrl}
+              alt=""
+              style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover" }}
+              onError={(e) => {
+                e.currentTarget.style.display = "none";
+              }}
+            />
+          ) : (
+            iconFor(i)
+          )}
+        </div>
+        <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+          <div style={{ fontWeight: 800, fontSize: 15 }}>
+            {i.name} {low && <span style={S.badgeInline}>low</span>}
+          </div>
+          <div style={{ fontSize: 12, color: "#8A9C90", marginTop: 1 }}>
+            {[i.brand, i.category, i.subcategory].filter(Boolean).join(" · ")}
+            {i.code ? ` · #${i.code}` : ""}
+          </div>
+          <div style={{ marginTop: 8 }}>
+            {(i.variants || []).length === 0 ? (
+              <span style={{ fontSize: 12, color: "#B0324C" }}>
+                No variants — edit to add sizes/colours
+              </span>
+            ) : (
+              (i.variants || []).map((v) => <VariantChip key={v.id} v={v} />)
+            )}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", minWidth: 110 }}>
+          <div style={{ fontWeight: 800, color: "#8E2C48", fontSize: 15 }}>
+            {INR(i.sellingPrice)}
+          </div>
+          {Number(i.mrp) > Number(i.sellingPrice) && (
+            <div style={{ fontSize: 11.5, color: "#9AA", textDecoration: "line-through" }}>
+              MRP {INR(i.mrp)}
+            </div>
+          )}
+          <div style={{ fontSize: 12, color: low ? "#C44536" : "#556", marginTop: 2 }}>
+            {st} in stock
+          </div>
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              marginTop: 8,
+              justifyContent: "flex-end",
+              flexWrap: "wrap",
+            }}
+          >
+            <button className="btn small" onClick={() => onRestock(i)}>
+              Restock
+            </button>
+            <button className="btn small" onClick={() => onEdit(i)}>
+              Edit
+            </button>
+            <button className="btn small ghost" onClick={() => onDelete(i)}>
+              Delete
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+});
+
 export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddCategory }) {
   const config = useShopConfig();
   const [q, setQ] = useState("");
@@ -34,8 +113,9 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
   const [form, setForm] = useState(null); // product form object, or null
   const [restock, setRestock] = useState(null); // product being restocked, or null
 
+  const dq = useDebouncedValue(q);
   const filtered = useMemo(() => {
-    const s = q.trim().toLowerCase();
+    const s = dq.trim().toLowerCase();
     return items
       .filter((i) => {
         if (group !== "All" && (i.category || "") !== group) return false;
@@ -49,7 +129,9 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         );
       })
       .sort((a, b) => String(a.name).localeCompare(String(b.name)));
-  }, [items, q, group, sub]);
+  }, [items, dq, group, sub]);
+  // Long catalogues render 100 cards at a time.
+  const [limit, showMore] = usePagedLimit(100, dq + "|" + group + "|" + sub);
 
   const subOptions = useMemo(
     () => (group === "All" ? cats : SUBCATEGORIES_BY_GROUP[group] || []),
@@ -95,6 +177,9 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
       notify("⚠ Couldn't delete the product.");
     }
   };
+
+  const onEdit = useStableCallback((p) => setForm(toFormShape(p)));
+  const onDelete = useStableCallback(del);
 
   const doRestock = async (product, variantId, qty) => {
     const n = Number(qty) || 0;
@@ -180,87 +265,20 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         </Empty>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
-          {filtered.map((i) => {
-            const st = productStock(i);
-            const low = isProductLow(i);
-            return (
-              <section
-                key={i.id}
-                style={{ ...S.panel, padding: 14, borderColor: low ? "#F0CDD6" : "#E2EAE3" }}
-              >
-                <div
-                  style={{ display: "flex", gap: 12, alignItems: "flex-start", flexWrap: "wrap" }}
-                >
-                  <div style={{ fontSize: 26, lineHeight: 1 }}>
-                    {i.imageUrl ? (
-                      <img
-                        src={i.imageUrl}
-                        alt=""
-                        style={{ width: 40, height: 40, borderRadius: 8, objectFit: "cover" }}
-                        onError={(e) => {
-                          e.currentTarget.style.display = "none";
-                        }}
-                      />
-                    ) : (
-                      iconFor(i)
-                    )}
-                  </div>
-                  <div style={{ flex: "1 1 240px", minWidth: 0 }}>
-                    <div style={{ fontWeight: 800, fontSize: 15 }}>
-                      {i.name} {low && <span style={S.badgeInline}>low</span>}
-                    </div>
-                    <div style={{ fontSize: 12, color: "#8A9C90", marginTop: 1 }}>
-                      {[i.brand, i.category, i.subcategory].filter(Boolean).join(" · ")}
-                      {i.code ? ` · #${i.code}` : ""}
-                    </div>
-                    <div style={{ marginTop: 8 }}>
-                      {(i.variants || []).length === 0 ? (
-                        <span style={{ fontSize: 12, color: "#B0324C" }}>
-                          No variants — edit to add sizes/colours
-                        </span>
-                      ) : (
-                        (i.variants || []).map((v) => <VariantChip key={v.id} v={v} />)
-                      )}
-                    </div>
-                  </div>
-                  <div style={{ textAlign: "right", minWidth: 110 }}>
-                    <div style={{ fontWeight: 800, color: "#8E2C48", fontSize: 15 }}>
-                      {INR(i.sellingPrice)}
-                    </div>
-                    {Number(i.mrp) > Number(i.sellingPrice) && (
-                      <div
-                        style={{ fontSize: 11.5, color: "#9AA", textDecoration: "line-through" }}
-                      >
-                        MRP {INR(i.mrp)}
-                      </div>
-                    )}
-                    <div style={{ fontSize: 12, color: low ? "#C44536" : "#556", marginTop: 2 }}>
-                      {st} in stock
-                    </div>
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: 6,
-                        marginTop: 8,
-                        justifyContent: "flex-end",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <button className="btn small" onClick={() => setRestock(i)}>
-                        Restock
-                      </button>
-                      <button className="btn small" onClick={() => setForm(toFormShape(i))}>
-                        Edit
-                      </button>
-                      <button className="btn small ghost" onClick={() => del(i)}>
-                        Delete
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              </section>
-            );
-          })}
+          {filtered.slice(0, limit).map((i) => (
+            <ProductRow
+              key={i.id}
+              i={i}
+              onRestock={setRestock}
+              onEdit={onEdit}
+              onDelete={onDelete}
+            />
+          ))}
+          {filtered.length > limit && (
+            <button className="btn" style={{ justifySelf: "center" }} onClick={showMore}>
+              Show more ({filtered.length - limit} more products)
+            </button>
+          )}
         </div>
       )}
 
