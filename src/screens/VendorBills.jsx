@@ -2,7 +2,7 @@ import { todayStr, uid, money, INR, dateStr } from "../lib/format.js";
 import { useState, useRef, useMemo } from "react";
 import { confirmDialog } from "../ui/dialogs.jsx";
 import { MAX_PROOF_BYTES, uploadBillProof, deleteBillProof, PROOF_ACCEPT } from "../lib/bills.js";
-import { Header, Field, Card, Empty } from "../ui/index.jsx";
+import { Header, Field, Card, Empty, focusFirstField } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 import { ChartCard, inrTick } from "../ui/charts.jsx";
 import { BarChart, CartesianGrid, XAxis, YAxis, Tooltip, Bar } from "recharts";
@@ -532,7 +532,11 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                   ? "No bills yet. Add your first vendor bill on the left."
                   : "No bills match these filters."
               }
-            />
+            >
+              <button className="btn primary" onClick={focusFirstField}>
+                Add a vendor bill
+              </button>
+            </Empty>
           ) : (
             <table className="tbl" style={{ marginTop: 12 }}>
               <thead>

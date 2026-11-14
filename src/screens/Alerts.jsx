@@ -77,7 +77,13 @@ export function Alerts({ items, goInventory }) {
 
       <section style={S.panel}>
         {list.length === 0 ? (
-          <Empty text="Nothing here — stock looks healthy." />
+          <Empty text="Nothing here — stock looks healthy.">
+            {goInventory && (
+              <button className="btn primary" onClick={goInventory}>
+                Open Inventory
+              </button>
+            )}
+          </Empty>
         ) : (
           <table className="tbl">
             <thead>

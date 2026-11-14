@@ -175,6 +175,11 @@ export const CSS = `
   .tbl th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:#7A8C81; padding:6px 8px; border-bottom:2px solid #E2EAE3; }
   .tbl td { padding:9px 8px; border-bottom:1px solid #EEF3EE; }
   .tbl tr:hover td { background:#F7FAF7; }
+  .skel { border-radius:8px; background:linear-gradient(90deg,#E9EFEA 25%,#F5F8F5 37%,#E9EFEA 63%); background-size:400% 100%; animation:skel 1.4s ease infinite; }
+  @keyframes skel { 0% { background-position:100% 50%; } 100% { background-position:0 50%; } }
+  @media (prefers-reduced-motion: reduce) { .skel { animation:none; } }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .sync-pill { display:none; }
   .tap { min-width:44px; min-height:44px; }
   .stepper { display:flex; align-items:center; gap:4px; }
   .step { width:44px; height:44px; border-radius:10px; border:1.5px solid #CFC3C9; background:#fff; color:#3A2A32; font-size:22px; font-weight:700; line-height:1; cursor:pointer; font-family:inherit; }
@@ -188,6 +193,8 @@ export const CSS = `
   .toasts { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:90; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(560px, calc(100vw - 24px)); }
   @media (max-width: 820px) {
     .toasts { bottom:calc(88px + env(safe-area-inset-bottom, 0px)); width:auto; left:12px; right:12px; transform:none; }
+    /* Sync state is always visible on a phone, not only at the bottom of the menu */
+    .sync-pill { display:inline-flex; align-items:center; gap:6px; position:fixed; top:8px; right:8px; z-index:45; min-height:32px; padding:0 12px; border-radius:16px; border:none; font-size:12.5px; font-weight:800; font-family:inherit; box-shadow:0 3px 10px rgba(0,0,0,.25); }
     /* Billing: total + Complete pinned to the bottom of the phone screen */
     .bill-bar { position:fixed; left:0; right:0; bottom:0; z-index:40; display:flex; align-items:center; gap:12px; background:#fff; border-top:1.5px solid #E1D4DA; box-shadow:0 -6px 18px rgba(0,0,0,.12); padding:10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); }
     .bill-bar-total { display:flex; flex-direction:column; min-width:96px; line-height:1.25; }

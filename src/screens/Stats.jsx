@@ -371,7 +371,13 @@ export function Stats({ sales, expenses, items }) {
 
       {pSales.length === 0 ? (
         <section style={{ ...S.panel, marginTop: 16 }}>
-          <Empty text="No sales in this period — pick a wider range to see the charts." />
+          <Empty text="No sales in this period — pick a wider range to see the charts.">
+            {preset !== "allTime" && (
+              <button className="btn primary" onClick={() => setPreset("allTime")}>
+                Show all time
+              </button>
+            )}
+          </Empty>
         </section>
       ) : (
         <>

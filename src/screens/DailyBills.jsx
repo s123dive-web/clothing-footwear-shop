@@ -14,7 +14,7 @@ import {
   dailyOutstanding,
 } from "../lib/dailyBills.js";
 import { todayStr, uid, INR, money, dateStr } from "../lib/format.js";
-import { Header, Field, Card, Empty } from "../ui/index.jsx";
+import { Header, Field, Card, Empty, focusFirstField } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 import { ChartCard, inrTick } from "../ui/charts.jsx";
 import {
@@ -594,7 +594,11 @@ export function DailyBills({
                   ? "No daily-need bills yet. Add your first one on the left."
                   : "No bills match these filters."
               }
-            />
+            >
+              <button className="btn primary" onClick={focusFirstField}>
+                Add a supplier bill
+              </button>
+            </Empty>
           ) : (
             <table className="tbl" style={{ marginTop: 12 }}>
               <thead>

@@ -23,7 +23,7 @@ export const timeToMin = (t) => {
 export const byDateTimeDesc = (a, b) =>
   a.date !== b.date ? (a.date < b.date ? 1 : -1) : timeToMin(b.time) - timeToMin(a.time);
 
-export function Udhari({ sales, setSales, notify, log }) {
+export function Udhari({ sales, setSales, notify, log, goBilling }) {
   const [openCust, setOpenCust] = useState(() => new Set()); // expanded customer names
   const [openBills, setOpenBills] = useState(() => new Set()); // expanded bills (showing order details)
   const [paying, setPaying] = useState(null); // the sale (bill) a repayment is being recorded against
@@ -211,7 +211,13 @@ export function Udhari({ sales, setSales, notify, log }) {
           </span>
         </div>
         {udhari.withDue.length === 0 ? (
-          <Empty text="No outstanding credit — all udhari settled. 🎉" />
+          <Empty text="No outstanding credit — all udhari settled. 🎉">
+            {goBilling && (
+              <button className="btn primary" onClick={goBilling}>
+                New bill
+              </button>
+            )}
+          </Empty>
         ) : (
           <table className="tbl">
             <thead>

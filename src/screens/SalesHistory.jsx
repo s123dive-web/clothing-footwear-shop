@@ -168,6 +168,7 @@ export function SalesHistory({
   salesFrom = null,
   loadOlderSales,
   recordSale,
+  goBilling,
 }) {
   const config = useShopConfig();
   const [open, setOpen] = useState(null);
@@ -586,7 +587,13 @@ export function SalesHistory({
 
       {sales.length === 0 && (
         <section style={S.panel}>
-          <Empty text="No sales yet. Bills will appear here after you complete a sale." />
+          <Empty text="No sales yet. Bills will appear here after you complete a sale.">
+            {goBilling && (
+              <button className="btn primary" onClick={goBilling}>
+                Start billing
+              </button>
+            )}
+          </Empty>
         </section>
       )}
       {sales.length > 0 && visible.length === 0 && (
@@ -597,7 +604,18 @@ export function SalesHistory({
                 ? `No bills match “${q.trim()}”${from || to ? " in this date range" : ""}.`
                 : "No bills in this date range."
             }
-          />
+          >
+            <button
+              className="btn"
+              onClick={() => {
+                setQ("");
+                setFrom("");
+                setTo("");
+              }}
+            >
+              Clear search and dates
+            </button>
+          </Empty>
         </section>
       )}
       {byDate.slice(0, dateLimit).map(([date, list]) => {

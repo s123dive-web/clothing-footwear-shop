@@ -11,6 +11,8 @@ import {
   records,
   eventually,
   dbPut,
+  blockDatabase,
+  unblockDatabase,
 } from "./helpers.js";
 
 const KURTI = {
@@ -283,4 +285,70 @@ test.describe("phone", () => {
     await completeBtn(page).click();
     await eventually(async () => expect(await records("sales")).toHaveLength(1));
   });
+});
+
+// ---------------------------------------------------------------------------------------------
+// Sync status, loading and empty states
+// ---------------------------------------------------------------------------------------------
+test("offline: the count of bills waiting to sync is shown, and clears once online", async ({
+  page,
+}) => {
+  await login(page);
+  await addProduct(page, KURTI);
+  await page.waitForTimeout(1000); // device cache write
+  await blockDatabase(page);
+  await page.reload();
+  await gotoTab(page, "Billing (POS)");
+  await addToCart(page, KURTI.name, "M · Red", 1);
+  await completeBtn(page).click();
+  await addToCart(page, KURTI.name, "S · Red", 1);
+  await completeBtn(page).click();
+  await expect(page.locator("nav.nav")).toContainText(
+    /Offline · 2 bills \+ \d+ other changes? waiting to sync/
+  );
+
+  await unblockDatabase(page);
+  await page.reload();
+  await expect(page.getByText("Online · syncing live")).toBeVisible();
+  await eventually(async () => expect(await records("sales")).toHaveLength(2));
+});
+
+test("every empty screen offers one clear next step", async ({ page }) => {
+  await login(page);
+  const expectAction = async (tab, text, button) => {
+    await gotoTab(page, tab);
+    await expect(page.getByText(text).first()).toBeVisible();
+    await expect(page.locator("main").getByRole("button", { name: button }).first()).toBeVisible();
+  };
+  await expectAction("Billing (POS)", "No products yet", "Open Inventory");
+  await expectAction("Inventory", "No products yet.", "+ Add your first product");
+  await expectAction("Sales History", "No sales yet.", "Start billing");
+  await expectAction("Udhari (Credit)", "No outstanding credit", "New bill");
+  await expectAction("Add Expense", "No expenses recorded", "Add an expense");
+  await expectAction("Supplier Bills", "No daily-need bills yet", "Add a supplier bill");
+  await expectAction("Vendor Bills", "No bills yet", "Add a vendor bill");
+  await expectAction("Alerts", "stock looks healthy", "Open Inventory");
+
+  // The action actually goes somewhere.
+  await gotoTab(page, "Sales History");
+  await page.locator("main").getByRole("button", { name: "Start billing" }).click();
+  await expect(page.getByRole("heading", { level: 1, name: "Billing" })).toBeVisible();
+});
+
+test("a skeleton is shown while a tab's code is loading (no bare 'Loading…')", async ({ page }) => {
+  await login(page);
+  // Hold back the Reports chunk so the fallback is observable.
+  let release;
+  const held = new Promise((r) => (release = r));
+  await page.route(/screens\/Stats\.jsx/, async (route) => {
+    await held;
+    await route.continue();
+  });
+  await gotoTab(page, "Reports");
+  const skel = page.getByRole("status", { name: /Loading/ });
+  await expect(skel.first()).toBeVisible();
+  await expect(page.locator("main .skel").first()).toBeVisible();
+  await expect(page.locator("main").getByText("Loading…", { exact: true })).toBeHidden();
+  release();
+  await expect(page.locator("main .skel")).toHaveCount(0, { timeout: 15000 });
 });

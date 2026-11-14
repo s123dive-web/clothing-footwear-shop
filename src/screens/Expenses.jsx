@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { todayStr, money, uid, INR } from "../lib/format.js";
-import { Header, Field, Empty } from "../ui/index.jsx";
+import { Header, Field, Empty, focusFirstField } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 
 // ---------- Add Expense (own page) ----------
@@ -158,7 +158,11 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                   ? "No expenses recorded yet."
                   : "No expenses recorded in " + monthLabel + "."
               }
-            />
+            >
+              <button className="btn primary" onClick={focusFirstField}>
+                Add an expense
+              </button>
+            </Empty>
           ) : (
             <table className="tbl">
               <thead>

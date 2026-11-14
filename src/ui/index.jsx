@@ -200,3 +200,40 @@ export function Modal({ title, children, onClose, zIndex }) {
     </div>
   );
 }
+
+// ---------- loading skeletons ----------
+// Grey shimmering placeholders in the shape of the content that is about to appear, instead
+// of a bare "Loading…". `label` is read by screen readers.
+export const Skeleton = ({ height = 16, width = "100%", style }) => (
+  <div className="skel" style={{ height, width, ...style }} />
+);
+export function PageSkeleton({ label = "Loading…", cards = 4, rows = 5 }) {
+  return (
+    <div role="status" aria-busy="true" aria-label={label} style={{ padding: "4px 0" }}>
+      <Skeleton height={26} width={200} style={{ marginBottom: 8 }} />
+      <Skeleton height={13} width={280} style={{ marginBottom: 20 }} />
+      {cards > 0 && (
+        <div style={{ ...S.cards, marginBottom: 16 }}>
+          {Array.from({ length: cards }, (_, i) => (
+            <Skeleton key={i} height={86} style={{ borderRadius: 14 }} />
+          ))}
+        </div>
+      )}
+      <section style={S.panel}>
+        {Array.from({ length: rows }, (_, i) => (
+          <Skeleton key={i} height={18} width={`${92 - i * 9}%`} style={{ margin: "12px 0" }} />
+        ))}
+      </section>
+      <span className="sr-only">{label}</span>
+    </div>
+  );
+}
+
+// Empty-state action for screens whose "first step" is the form at the top of the page.
+export function focusFirstField() {
+  const el = document.querySelector(
+    "main input:not([type=hidden]):not([type=file]):not([type=date]):not([type=month])"
+  );
+  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (el) el.focus({ preventScroll: true });
+}

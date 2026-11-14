@@ -30,7 +30,7 @@ const heldLabel = (b) =>
   new Date(b.at || Date.now()).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
 // ---------- Billing / POS ----------
-export function Billing({ items, sales, recordSale, online, notify, log }) {
+export function Billing({ items, sales, recordSale, online, notify, log, goInventory }) {
   const config = useShopConfig();
   const [q, setQ] = useState("");
   const [cart, setCart] = useState([]); // [{ key, productId, variantId, name, brand, icon, size, color, sellingPrice, purchasePrice, category, subcategory, qty, misc? }]
@@ -514,7 +514,19 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
           >
             {results.length === 0 && (
-              <Empty text={q ? "No products match." : "No products yet — add some in Inventory."} />
+              <Empty text={q ? "No products match." : "No products yet — add some in Inventory."}>
+                {q ? (
+                  <button className="btn" onClick={() => setQ("")}>
+                    Clear search
+                  </button>
+                ) : (
+                  goInventory && (
+                    <button className="btn primary" onClick={goInventory}>
+                      Open Inventory
+                    </button>
+                  )
+                )}
+              </Empty>
             )}
             {results.map((i) => {
               const st = stockOf(i);

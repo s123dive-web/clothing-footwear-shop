@@ -1,7 +1,7 @@
 import { useState, useEffect, lazy, Suspense } from "react";
 import { todayStr, money, INR } from "../lib/format.js";
 import { productStock, productLowVariants, variantLabel } from "../lib/products.js";
-import { Header, Card, Empty } from "../ui/index.jsx";
+import { Header, Card, Empty, Skeleton } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 
 // Charts (and with them the recharts bundle) load on demand — see DashboardCharts.jsx.
@@ -12,8 +12,14 @@ const DashOverTimeCharts = lazy(() =>
   import("./DashboardCharts.jsx").then((m) => ({ default: m.DashOverTimeCharts }))
 );
 const ChartsLoading = () => (
-  <section style={{ ...S.panel, marginTop: 16, color: "#8A9C90", fontSize: 13 }}>
-    Loading charts…
+  <section
+    role="status"
+    aria-busy="true"
+    aria-label="Loading charts…"
+    style={{ ...S.panel, marginTop: 16 }}
+  >
+    <Skeleton height={14} width={180} style={{ marginBottom: 12 }} />
+    <Skeleton height={170} />
   </section>
 );
 

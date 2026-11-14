@@ -16,7 +16,7 @@ export const LOG_COLORS = {
   bill: "#0E7C86",
 };
 
-export function Logs({ logs, setLogs, notify }) {
+export function Logs({ logs, setLogs, notify, goBilling }) {
   const [date, setDate] = useState(""); // "" = all dates
   const [type, setType] = useState("all");
 
@@ -99,7 +99,25 @@ export function Logs({ logs, setLogs, notify }) {
                 ? "No activity yet. Actions you take in the app will appear here."
                 : "No activity matches this filter."
             }
-          />
+          >
+            {logs.length === 0 ? (
+              goBilling && (
+                <button className="btn primary" onClick={goBilling}>
+                  Start billing
+                </button>
+              )
+            ) : (
+              <button
+                className="btn"
+                onClick={() => {
+                  setDate("");
+                  setType("all");
+                }}
+              >
+                Show all activity
+              </button>
+            )}
+          </Empty>
         ) : (
           <table className="tbl">
             <thead>

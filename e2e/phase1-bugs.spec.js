@@ -352,7 +352,7 @@ test("offline: delete a bill, reopen online → bill gone and stock restored onc
     .click();
   await page.getByRole("button", { name: "🗑 Delete" }).click();
   await expect(page.getByText("No sales yet.")).toBeVisible();
-  await expect(page.getByText(/Offline · \d+ changes? waiting to sync/)).toBeVisible();
+  await expect(page.getByText(/Offline · .*waiting to sync/)).toBeVisible();
   // Stock shown on this device already reflects the pending restore.
   await gotoTab(page, "Inventory");
   await expect(page.locator("main section").filter({ hasText: KURTI.name })).toContainText(

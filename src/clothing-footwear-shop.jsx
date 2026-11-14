@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { useDebouncedValue } from "./ui/hooks.js";
+import { syncSummary } from "./lib/syncStatus.js";
+import { PageSkeleton } from "./ui/index.jsx";
 import { DialogHost, confirmDialog, promptDialog } from "./ui/dialogs.jsx";
 import { useToasts, ToastStack } from "./ui/toasts.jsx";
 import { isFirebaseConfigured, auth } from "./config/firebase.js";
@@ -92,17 +95,11 @@ export default function App() {
   if (!isFirebaseConfigured) return <FirebaseSetupNeeded />;
   if (user === undefined) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          background: "#2A1A22",
-          color: "#E6C9D4",
-          fontFamily: "system-ui, sans-serif",
-        }}
-      >
-        Loading…
+      <div style={{ minHeight: "100vh", background: "#F3F6F3", padding: 24 }}>
+        <style>{CSS}</style>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <PageSkeleton label="Loading…" />
+        </div>
       </div>
     );
   }
@@ -246,6 +243,14 @@ function StoreManager({ user, onLogout }) {
   const seeded = useRef(false);
   const [online, setOnline] = useState(true);
   const items = useMemo(() => overlayPendingStock(rawItems, pendingOps), [rawItems, pendingOps]);
+  // While online a write is normally acknowledged within a moment — only writes that have
+  // been waiting a few seconds are worth telling the user about (no flicker on every bill).
+  const lingering = useDebouncedValue(pendingOps, 2500);
+  const sync = useMemo(
+    () =>
+      syncSummary(online, online ? lingering.filter((o) => pendingOps.includes(o)) : pendingOps),
+    [online, pendingOps, lingering]
+  );
 
   // Always-current local state, readable from inside async listeners (for the merge) and by
   // the cache writer. `items` here is the RAW cloud view — pending stock is re-overlaid from the
@@ -1030,19 +1035,15 @@ function StoreManager({ user, onLogout }) {
                   display: "inline-block",
                 }}
               />
-              {online
-                ? "Online · syncing live"
-                : pendingOps.length
-                  ? `Offline · ${pendingOps.length} change${pendingOps.length === 1 ? "" : "s"} waiting to sync`
-                  : "Offline · saved on this device"}
+              {sync.tone === "error" ? "Online" : sync.text}
             </span>
-            {online && pendingOps.some((o) => o.error) && (
+            {sync.tone === "error" && (
               <button
                 className="navbtn"
                 style={{ border: "1px solid #C9803A", color: "#F2C48D", margin: "2px 0 4px" }}
                 onClick={() => outboxRef.current?.retryNow()}
               >
-                ⚠ {pendingOps.filter((o) => o.error).length} not synced — tap to retry
+                ⚠ {sync.text}
               </button>
             )}
             <br />
@@ -1057,9 +1058,9 @@ function StoreManager({ user, onLogout }) {
 
         {/* main */}
         <main className="main" style={S.main}>
-          <Suspense fallback={<div style={{ padding: 40, color: "#667" }}>Loading…</div>}>
+          <Suspense fallback={<PageSkeleton />}>
             {!loaded ? (
-              <div style={{ padding: 40, color: "#667" }}>Loading store data…</div>
+              <PageSkeleton label="Loading store data…" />
             ) : tab === "dashboard" ? (
               <Dashboard
                 items={items}
@@ -1076,6 +1077,7 @@ function StoreManager({ user, onLogout }) {
                 sales={sales}
                 recordSale={recordSale}
                 online={online}
+                goInventory={() => setTab("inventory")}
                 notify={notify}
                 log={addLog}
               />
@@ -1104,6 +1106,7 @@ function StoreManager({ user, onLogout }) {
                 setSales={setSales}
                 amendSale={amendSale}
                 voidSale={voidSale}
+                goBilling={() => setTab("billing")}
                 recordSale={recordSale}
                 salesFrom={salesFrom}
                 loadOlderSales={loadOlderSales}
@@ -1119,7 +1122,13 @@ function StoreManager({ user, onLogout }) {
                 <Stats sales={sales} expenses={expenses} items={items} />
               </AllSalesGate>
             ) : tab === "udhari" ? (
-              <Udhari sales={sales} setSales={setSales} notify={notify} log={addLog} />
+              <Udhari
+                sales={sales}
+                setSales={setSales}
+                notify={notify}
+                log={addLog}
+                goBilling={() => setTab("billing")}
+              />
             ) : tab === "expense" ? (
               <Expenses
                 expenses={expenses}
@@ -1148,7 +1157,12 @@ function StoreManager({ user, onLogout }) {
                 log={addLog}
               />
             ) : tab === "logs" ? (
-              <Logs logs={logs} setLogs={setLogs} notify={notify} />
+              <Logs
+                logs={logs}
+                setLogs={setLogs}
+                notify={notify}
+                goBilling={() => setTab("billing")}
+              />
             ) : tab === "settings" ? (
               <Settings config={config} onSave={updateConfig} notify={notify} />
             ) : tab === "admin" ? (
@@ -1177,6 +1191,20 @@ function StoreManager({ user, onLogout }) {
           </Suspense>
         </main>
 
+        {sync.tone !== "ok" && (
+          <button
+            className="sync-pill"
+            style={{
+              background:
+                sync.tone === "error" ? "#7A1C14" : sync.tone === "offline" ? "#8A4B08" : "#1B5E43",
+              color: "#fff",
+            }}
+            onClick={() => outboxRef.current?.retryNow()}
+            aria-label={sync.text}
+          >
+            {sync.tone === "error" ? "⚠" : sync.tone === "offline" ? "⛔" : "⟳"} {sync.short}
+          </button>
+        )}
         <ToastStack toasts={toasts} dismiss={dismissToast} />
         <DialogHost />
       </div>
