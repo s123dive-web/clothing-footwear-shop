@@ -1,45 +1,84 @@
-name: Deploy to GitHub Pages
+name: CI and deploy to GitHub Pages
 
+# ci   — every pull request and every push: npm ci → lint → unit tests → build.
+# e2e  — every pull request and every push: Playwright smoke tests against the Firebase
+#        Emulator Suite (never the live database).
+# deploy — ONLY on main (push or manual run), and only after ci has passed.
 on:
   push:
-    branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
-# Allow one concurrent deployment; newer runs cancel in-progress ones.
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  # Per-ref for CI; a newer push to the same branch/PR cancels the older run. Runs on main are
+  # never cancelled half-way so a deploy in progress always finishes.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
-  build:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          # Node 24 ships npm 11, which correctly skips esbuild's foreign-platform
-          # optional deps during `npm ci`. npm 10 (Node 20) errors EBADPLATFORM on them.
+          # Same Node line the live site has always been built with. The lockfile is also
+          # verified to `npm ci` cleanly on Node 20 and 22 (see CLAUDE.md).
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run build
+      - run: npm run lint
       - run: npm test
-      - uses: actions/configure-pages@v5
-      - uses: actions/upload-pages-artifact@v3
+      - run: npm run build
+      - if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
         with:
           path: dist
 
-  deploy:
-    needs: build
+  e2e:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4 # Firebase emulators need a JRE (21+)
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/firebase/emulators
+          key: firebase-emulators-${{ hashFiles('package-lock.json') }}
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e
+      - if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  deploy:
+    needs: ci
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
+      - uses: actions/configure-pages@v5
       - id: deployment
         uses: actions/deploy-pages@v4
