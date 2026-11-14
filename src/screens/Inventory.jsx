@@ -9,6 +9,8 @@ import {
 } from "../lib/catalog.js";
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, useRef, memo } from "react";
+import { labelsHtml } from "../lib/barcode.js";
+import { printHtml } from "../lib/print.js";
 import { featureOn } from "../config/features.js";
 import { GST_RATES } from "../lib/gst.js";
 import { confirmDialog, alertDialog } from "../ui/dialogs.jsx";
@@ -32,7 +34,7 @@ import { INR } from "../lib/format.js";
 
 // One product card. Memoised: while the owner types in the search box (or a toast appears) the
 // cards whose product object has not changed are not re-rendered.
-const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) {
+const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete, onLabels }) {
   const st = productStock(i);
   const low = isProductLow(i);
   return (
@@ -92,6 +94,11 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) 
               flexWrap: "wrap",
             }}
           >
+            {onLabels && (
+              <button className="btn small" onClick={() => onLabels(i)}>
+                🏷 Labels
+              </button>
+            )}
             <button className="btn small" onClick={() => onRestock(i)}>
               Restock
             </button>
@@ -199,6 +206,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
 
   const onEdit = useStableCallback((p) => setForm(toFormShape(p)));
   const onDelete = useStableCallback(del);
+  // Feature "barcode": print a size / price label with a barcode for every variant.
+  const printLabels = useStableCallback((p) =>
+    printHtml(labelsHtml(p, { money: INR, shop: config.name }), "Labels — " + p.name)
+  );
+  const onLabels = featureOn("barcode") ? printLabels : null;
 
   const doRestock = async (product, variantId, qty) => {
     const n = Number(qty) || 0;
@@ -293,6 +305,7 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
               onRestock={setRestock}
               onEdit={onEdit}
               onDelete={onDelete}
+              onLabels={onLabels}
             />
           ))}
           {filtered.length > limit && (

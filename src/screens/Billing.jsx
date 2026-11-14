@@ -1,5 +1,6 @@
 import { useShopConfig } from "../config/shopConfig.js";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, lazy, Suspense } from "react";
+import { matchCode } from "../lib/barcode.js";
 import { creditToUse } from "../lib/returns.js";
 import { featureOn } from "../config/features.js";
 import { provisionalNo } from "../lib/billNumbers.js";
@@ -13,6 +14,11 @@ import { Header, Empty, Modal } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 import { CURRENCY } from "../config/currency.js";
 import { printReceipt, preloadReceiptAssets } from "../lib/print.js";
+
+// The camera scanner (and the ZXing fallback it may pull in) loads only when it is opened.
+const BarcodeScanner = lazy(() =>
+  import("../ui/BarcodeScanner.jsx").then((m) => ({ default: m.BarcodeScanner }))
+);
 
 const HELD_KEY = "cfs-held-bills-v1";
 const loadHeldBills = () => {
@@ -373,6 +379,20 @@ export function Billing({
     printReceipt(liveSale(), config, t);
   };
 
+  // Feature "barcode": a scanned code adds its variant straight to the bill.
+  const [scanning, setScanning] = useState(false);
+  const onScan = (code) => {
+    const hit = matchCode(items, code);
+    if (!hit) return notify(`No product for code “${code}”`);
+    if (hit.variant) {
+      addVariant(hit.product, hit.variant);
+      notify(`Added ${hit.product.name} — ${variantLabel(hit.variant)}`);
+    } else {
+      setScanning(false);
+      openProduct(hit.product);
+    }
+  };
+
   const completeSale = () => {
     if (cart.length === 0 || soldCart.current === cart) return;
     // Re-check against the freshest variant stock (another device may have sold since).
@@ -504,6 +524,15 @@ export function Billing({
             aria-label="Search products or scan barcode"
             style={{ marginBottom: 12 }}
           />
+          {featureOn("barcode") && (
+            <button
+              className="btn tap"
+              style={{ width: "100%", marginBottom: 12 }}
+              onClick={() => setScanning(true)}
+            >
+              📷 Scan barcode
+            </button>
+          )}
           <div
             style={{
               display: "flex",
@@ -1018,6 +1047,12 @@ export function Billing({
           )}
         </section>
       </div>
+
+      {scanning && (
+        <Suspense fallback={null}>
+          <BarcodeScanner onDetect={onScan} onClose={() => setScanning(false)} />
+        </Suspense>
+      )}
 
       {/* variant picker modal */}
       {picker && (
