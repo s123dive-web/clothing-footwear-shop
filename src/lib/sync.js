@@ -278,3 +278,27 @@ export const subscribeUsers = (onData) =>
     () => onData({})
   );
 export const setUser = (uid, value) => set(ref(db, "shop/users/" + uid), value);
+
+// Error reports (lib/errorReport.js): shop/meta/errors/<id>.
+const errorsRef = () => ref(db, "shop/meta/errors");
+export const writeErrorReport = (id, rec) => set(ref(db, "shop/meta/errors/" + id), sanitize(rec));
+export const readErrorReports = () => get(errorsRef()).then((s) => s.val() || {});
+export const removeErrorReports = (ids) =>
+  update(errorsRef(), Object.fromEntries(ids.map((id) => [id, null])));
+export const subscribeErrorReports = (onData) =>
+  onValue(
+    errorsRef(),
+    (s) => onData(s.val() || {}),
+    () => onData({})
+  );
+
+// A bill as read from the cloud, made safe to render: `lines` is always an array. (RTDB drops
+// an empty array and turns a sparse one into an object.) Returns the same object when it is
+// already fine, so nothing is re-written because of this.
+export function safeSale(rec) {
+  if (!rec || Array.isArray(rec.lines)) return rec;
+  return {
+    ...rec,
+    lines: rec.lines && typeof rec.lines === "object" ? Object.values(rec.lines) : [],
+  };
+}

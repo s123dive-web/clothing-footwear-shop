@@ -25,6 +25,13 @@
 
 const DEFAULT_BACKOFF = [3000, 10000, 30000, 60000, 300000];
 
+// After this many refusals by the server an op is "stuck": it is no longer retried on a timer
+// (it would only fail again) and waits for the user to retry it by hand or discard it. Network
+// trouble never makes an op stuck — only an answer from the server saying no.
+export const STUCK_AFTER = 3;
+export const isRefusal = (err) =>
+  /permission[_ ]denied/i.test(String((err && (err.code || err.message)) || err || ""));
+
 export function createOutbox({
   store, // { loadOutbox(), putOp(op), removeOp(id), journalAdd?(op), journalRemove?(id), journalLoad?() }
   send, // (op) => Promise — resolves once the server acknowledged the whole op
@@ -86,17 +93,19 @@ export function createOutbox({
         if (stopped) return;
         op.attempts = (op.attempts || 0) + 1;
         op.error = String((err && (err.code || err.message)) || err);
+        if (isRefusal(err) && op.attempts >= STUCK_AFTER) op.stuck = true;
         emit();
         onError(op, err);
-        scheduleRetry(op.attempts);
+        if (!op.stuck) scheduleRetry(op.attempts);
       }
     );
   };
 
-  // (Re)issue every pending op that has no send outstanding, in order.
-  function flush() {
+  // (Re)issue every pending op that has no send outstanding, in order. Stuck ops are left
+  // alone unless `force` (the user asked for a retry).
+  function flush(force = false) {
     if (stopped) return;
-    for (const op of ops) dispatch(op);
+    for (const op of ops) if (force || !op.stuck) dispatch(op);
   }
 
   return {
@@ -130,7 +139,7 @@ export function createOutbox({
       ops = [...stored, ...ops];
       for (const o of ops) lastSeq = Math.max(lastSeq, o.seq || 0);
       emit();
-      chain = chain.then(flush);
+      chain = chain.then(() => flush());
       return ops.slice();
     },
 
@@ -161,6 +170,7 @@ export function createOutbox({
 
     pending: () => ops.slice(),
     failed: () => ops.filter((o) => o.error && !inFlight.has(o.id)),
+    stuck: () => ops.filter((o) => o.stuck),
 
     // Retry failed ops now (e.g. the connection just came back, or the user tapped "retry").
     retryNow() {
@@ -168,7 +178,23 @@ export function createOutbox({
         clearTimer(retryTimer);
         retryTimer = null;
       }
-      flush();
+      flush(true);
+    },
+
+    // Give up on an op: it is removed without ever having been acknowledged. Only for an op
+    // the server keeps refusing — the change it carried is NOT in the cloud.
+    async discard(id) {
+      const op = ops.find((o) => o.id === id);
+      if (!op) return null;
+      ops = ops.filter((o) => o !== op);
+      emit();
+      try {
+        if (store.journalRemove) store.journalRemove(id);
+        await store.removeOp(id);
+      } catch (e) {
+        console.error("outbox: could not remove discarded op", e);
+      }
+      return op;
     },
 
     // Resolves when everything queued so far has been persisted and issued (not acked).

@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { reportError } from "./lib/reporter.js";
+import { SyncProblems } from "./ui/SyncProblems.jsx";
 import { RoleContext, STAFF_TABS, STAFF_SLICES, roleFrom } from "./config/role.js";
 import { featureOn, tabEnabled } from "./config/features.js";
 import { unnumbered, fyLabel } from "./lib/billNumbers.js";
@@ -57,6 +59,7 @@ import {
   allocateBillNumber,
   subscribeMeta,
   readOwnUser,
+  safeSale,
 } from "./lib/sync.js";
 import { backupStatus } from "./lib/backupReminder.js";
 import {
@@ -313,6 +316,7 @@ function StoreManager({ user, onLogout, role = "owner" }) {
   // While online a write is normally acknowledged within a moment — only writes that have
   // been waiting a few seconds are worth telling the user about (no flicker on every bill).
   const lingering = useDebouncedValue(pendingOps, 2500);
+  const [syncProblemsOpen, setSyncProblemsOpen] = useState(false);
   const sync = useMemo(
     () =>
       syncSummary(online, online ? lingering.filter((o) => pendingOps.includes(o)) : pendingOps),
@@ -390,6 +394,16 @@ function StoreManager({ user, onLogout, role = "owner" }) {
         },
         onError: (op, err) => {
           console.error("sync write failed", op.label || "", err);
+          // Report the first failure of an op, and again if the server keeps refusing it.
+          if (op.attempts === 1 || op.stuck)
+            reportError("sync", err, {
+              where: op.stuck ? "outbox (stuck)" : "outbox",
+              op: op.label || "",
+              paths: Object.keys(op.patch || {})
+                .slice(0, 5)
+                .join(", "),
+              attempts: String(op.attempts),
+            });
           if (Date.now() - lastSyncWarn.current > 30000) {
             lastSyncWarn.current = Date.now();
             notifyRef.current?.(
@@ -485,7 +499,14 @@ function StoreManager({ user, onLogout, role = "owner" }) {
           });
         return;
       }
-      const cloud = toMap(val);
+      let cloud = toMap(val);
+      if (slice === "sales") {
+        // Never let a malformed bill (no `lines`) crash a screen.
+        for (const id of Object.keys(cloud)) {
+          const fixed = safeSale(cloud[id]);
+          if (fixed !== cloud[id]) cloud = { ...cloud, [id]: fixed };
+        }
+      }
       // One-time migration of legacy array / numeric-keyed data → keyed-by-id map. NEVER for a
       // windowed (partial) view: writing that back as the whole slice would delete every bill
       // outside the window.
@@ -1200,7 +1221,7 @@ function StoreManager({ user, onLogout, role = "owner" }) {
               <button
                 className="navbtn"
                 style={{ border: "1px solid #C9803A", color: "#F2C48D", margin: "2px 0 4px" }}
-                onClick={() => outboxRef.current?.retryNow()}
+                onClick={() => setSyncProblemsOpen(true)}
               >
                 ⚠ {syncText(sync, t)}
               </button>
@@ -1367,6 +1388,7 @@ function StoreManager({ user, onLogout, role = "owner" }) {
                   user={user}
                   notify={notify}
                   log={addLog}
+                  sales={sales}
                 />
               </AllSalesGate>
             ) : (
@@ -1391,11 +1413,27 @@ function StoreManager({ user, onLogout, role = "owner" }) {
                 sync.tone === "error" ? "#7A1C14" : sync.tone === "offline" ? "#8A4B08" : "#1B5E43",
               color: "#fff",
             }}
-            onClick={() => outboxRef.current?.retryNow()}
+            onClick={() =>
+              sync.tone === "error" ? setSyncProblemsOpen(true) : outboxRef.current?.retryNow()
+            }
             aria-label={syncText(sync, t)}
           >
             {sync.tone === "error" ? "⚠" : sync.tone === "offline" ? "⛔" : "⟳"} {sync.short}
           </button>
+        )}
+        {syncProblemsOpen && (
+          <SyncProblems
+            ops={pendingOps.filter((o) => o.error)}
+            onRetry={() => outboxRef.current?.retryNow()}
+            onDiscard={async (id) => {
+              await outboxRef.current?.discard(id);
+              addLog("admin", "Discarded a change the server refused");
+              // The discarded change is still on screen; reload so the screen shows what the
+              // cloud really has.
+              setTimeout(() => window.location.reload(), 600);
+            }}
+            onClose={() => setSyncProblemsOpen(false)}
+          />
         )}
         <ToastStack toasts={toasts} dismiss={dismissToast} />
         <DialogHost />

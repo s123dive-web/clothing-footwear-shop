@@ -15,16 +15,30 @@ Settings** screen — there is no hardcoded shop name anywhere.
 
 ## Run it
 
+Node 20.19+, 22.12+ or 24 (`npm ci` is verified on all three).
+
 ```bash
-npm install
-npm run dev      # http://localhost:5173
+npm ci
+npm run emulators      # terminal 1 — local Firebase (auth, database, storage). Needs Java 21+
+npm run dev:emulator   # terminal 2 — the app against the emulators, http://localhost:5173
 ```
 
-Other scripts: `npm run build`, `npm run preview`, `npm run lint`, `npm run format`,
-`npm test` (Vitest), `npm run test:watch`.
+That is the safe way to try things: it never touches the live shop. `npm run dev` runs the app
+against the **live** Firebase project in `src/config/firebase.js`.
+
+| Script | What it does |
+|---|---|
+| `npm test` | Unit tests (Vitest) |
+| `npm run test:e2e` | Playwright end-to-end tests — starts the emulators, an emulator-mode dev server and a production preview by itself. First time: `npx playwright install chromium` |
+| `npm run lint` · `npm run format` | ESLint · Prettier |
+| `npm run build` · `npm run preview` | Production build · serve it locally |
 
 Until you point it at a Firebase project (below), the app shows a friendly **“Configure
 Firebase”** screen instead of crashing.
+
+**Deploying:** pushing to `main` builds and deploys to GitHub Pages
+(`.github/workflows/deploy.yml`), after lint, unit tests and build pass. Pull requests and other
+branches run the same checks plus the end-to-end suite, without deploying.
 
 ## Firebase setup (required)
 
@@ -47,16 +61,24 @@ firebase deploy --only database,storage
 ```
 
 - [`database.rules.json`](database.rules.json) — Realtime Database access. **Authentication is
-  required for every read/write** (no open rules); by default it's locked to the single owner
-  email. A commented one-liner switches it to “any signed-in user”.
+  required for every read/write** (no open rules). The owner (by sign-in email) has full
+  access; accounts the owner lists as **staff** get limited access (see *Staff accounts*
+  below); nobody else gets anything. The file also declares the indexes the app's queries need
+  (`shop/sales` by `date` and `payment`) and **validation** for bills and products (required
+  fields, numeric types, stock never negative).
+
+  > **Before deploying new rules:** open **Admin → Check data against rules** in the app. A
+  > stored record that breaks the validation can still be read and deleted, but not edited,
+  > until it is fixed. The rules are covered by unit tests (`e2e/rules.spec.js`).
 - [`storage.rules`](storage.rules) — Storage access for supplier-bill proof files (owner-only,
   10 MB cap).
 - [`firebase.json`](firebase.json) — points the CLI at both rule files.
 
 The Firebase config is **public by design** (every client-side Firebase app ships its config);
-the **rules** are what keep the data private. Never commit real keys you want kept secret — the
-committed `firebase.js` holds only placeholders, and `.gitignore` ignores
-`src/config/firebase.local.js` and `.env*` for anything sensitive.
+the **rules** are what keep the data private. The committed
+[`src/config/firebase.js`](src/config/firebase.js) holds this shop's web config;
+`.gitignore` ignores `src/config/firebase.local.js` and `.env*` for anything that really is
+secret.
 
 ## Data model
 
@@ -85,7 +107,68 @@ Products live at `shop/items/<id>` with size/colour **variants**:
   by size or category.
 
 Other slices: `sales`, `expenses`, `logs`, `vendorBills`, `dailyBills` (supplier bills), plus
-`shopConfig` (shop identity) and `meta/seeded` (the one-time seed guard).
+`shopConfig` (shop identity) and `meta` (`seeded`, `customSubcats`, `errors`, and — only when
+their features are on — `billCounters`, `lastBackupAt`). The full, current data model with
+every optional field and the migration notes is in [`CLAUDE.md`](CLAUDE.md).
+
+## Working offline, and how data is kept safe
+
+- **Installable.** On Android Chrome use *Add to Home screen*. The app shell is cached, so it
+  opens at the counter with no network. A new version is downloaded in the background and the
+  app shows **“Update available — Reload”**; it never reloads by itself in the middle of a bill.
+- **Bills never wait for the network.** Completing a sale records it on the device at once.
+  Every change is first written to a durable **outbox** (IndexedDB) and then sent; it is
+  removed only when the server has confirmed it, retried if it fails, and replayed after a
+  reload or a crash. A bill and its stock change travel together and cannot be applied twice.
+- **Sync status** is in the sidebar (and a pill on phones): *Online · syncing live*,
+  *Offline · 3 bills waiting to sync*, or *N not synced — tap to retry*, which opens the list
+  of changes the server refused with **Retry** and **Discard**.
+- **Recent bills only.** The app loads bills from the last three months plus every credit
+  (Udhari) bill; older ones load on demand in Sales History and automatically for Reports,
+  Admin, backup and restore.
+- **Back up regularly** with ⬇ JSON / ⬇ XLSX in the sidebar. A backup always contains every
+  bill; one made offline is named `…-PARTIAL-…` and says so.
+- **Errors are reported.** Crashes and sync failures from any device appear in
+  **Admin → Error reports**.
+
+## Language
+
+English, Hindi and Marathi — switch in the sidebar, on the sign-in screen or in Settings. It is
+remembered per device. Menus, screen titles, the Billing screen and the printed receipt are
+translated; the detailed labels inside other screens are still English.
+
+## Optional features (switched off)
+
+These are built and tested but **off** until switched on in
+[`src/config/features.js`](src/config/features.js) (set the flag to `true`, merge, deploy):
+
+| Flag | Feature |
+|---|---|
+| `paymentSettings` | UPI ID, your own payment QR, receipt width 58 / 80 mm |
+| `billNumbers` | Sequential bill numbers per financial year (`2026-27/0001`) |
+| `whatsappReceipt` | Send a bill on WhatsApp |
+| `dayClose` | Day Close: cash / UPI / credit totals, expected vs counted cash |
+| `backupReminder` | “Last backup N days ago” and a weekly reminder |
+| `customerLedger` | Customers: purchases, outstanding credit, WhatsApp reminder |
+| `restockSuggestions` | Restock: sell-through, days of stock left, fast sizes |
+| `gstInvoice` | HSN + GST rate per product, CGST/SGST on the receipt |
+| `returns` | Returns & exchange |
+| `barcode` | Camera barcode scan and printable labels |
+| `staffAccounts` | Staff accounts (see below) |
+
+Read the notes for each in [`CLAUDE.md`](CLAUDE.md) before switching one on — in particular
+`returns` (all devices must be on this version first) and `staffAccounts` (deploy the rules
+first).
+
+### Staff accounts
+
+With `staffAccounts` on, the owner creates staff sign-ins in **Admin → Staff accounts**. Staff
+can bill, look up stock, see bills and take credit repayments. They cannot open Dashboard,
+Reports, Expenses, Vendor/Supplier Bills, Settings or Admin, and cannot edit or delete bills.
+
+**Limit you should know:** the Realtime Database cannot hide individual fields, so a staff
+account can still read cost price and profit through the Firebase API. The app hides them on
+screen; that is not a security boundary.
 
 ## Features
 
@@ -105,7 +188,10 @@ Other slices: `sales`, `expenses`, `logs`, `vendorBills`, `dailyBills` (supplier
 - **Udhari (Credit)**, **Add Expense**, **Vendor Bills** (with proof upload), **Supplier
   Bills**, **Data Import** (txt/csv/xls/xlsx/pdf/json → products/sales/expenses), **Activity
   Log**, **Settings**, and a password-guarded **Admin** for bulk operations.
-- **Mobile-friendly** — the sidebar collapses and grids stack on small screens for counter use.
+- **Mobile-friendly** — on a phone the total and the Complete button stay pinned to the bottom
+  of the Billing screen; quantity steppers and every control are at least 44 px; amount fields
+  open the numeric keypad; a bill can be put on **Hold** and resumed.
+- **Undo instead of “are you sure?”** for deleting a bill, a product or an expense.
 
 ## Settings (shop identity)
 
@@ -134,13 +220,24 @@ Three source bugs were **fixed, not carried over**:
 ## Tests
 
 ```bash
-npm test
+npm test            # unit tests (Vitest)
+npm run test:e2e    # end-to-end tests (Playwright + Firebase emulators)
 ```
 
-[Vitest](https://vitest.dev) covers the correctness-critical pure modules (188 tests): products
-& variants, the apparel catalog/sizes, shop-config normalisation/validation, the reports
-(sales-by-category, best-selling sizes, dead stock, inventory value), the array↔map sync + 3-way
-merge, and the tolerant import parser. Firebase is not touched by the suite.
+- **Unit tests** cover the pure modules: products & variants, catalog/sizes, shop config,
+  reports, the array↔map sync and 3-way merge, the import parser, the outbox (replay,
+  idempotency, crash mid-replay, refused writes), stock ops, the device database, the sales
+  window, bill numbers, GST, returns, day close, customers, restock, barcodes, roles, record
+  validation, error reports and the strings table.
+- **End-to-end tests** drive the real app against the local Firebase emulators — never the live
+  shop: the core counter flows, the offline and crash-recovery cases, the sales window, the
+  installable shell (against a production build with all outside requests blocked), usability,
+  an accessibility audit of every screen, the language toggle, every optional feature, staff
+  accounts, and the security rules.
+
+[`docs/QA.md`](docs/QA.md) lists what is verified automatically and **what still has to be
+checked by hand on a real phone**. [`CLAUDE.md`](CLAUDE.md) is the engineering guide:
+architecture, data model, migration notes, and the regression checklist.
 
 ## Screenshots
 
@@ -153,10 +250,17 @@ _Add screenshots here — e.g. Billing (variant picker), Inventory (size/colour 
 ## Libraries
 
 - **firebase** — Auth, Realtime Database (live sync), Storage.
-- **recharts** — charts. · **pdfjs-dist** — PDF import (lazy-loaded).
-- **xlsx (SheetJS)** — csv/xls/xlsx import + XLSX backups (patched CDN build).
+- **recharts** — charts (loaded with the Dashboard charts / Reports). · **pdfjs-dist** — PDF
+  import (loaded on demand).
+- **xlsx (SheetJS)** — csv/xls/xlsx import + XLSX backups (patched CDN build, loaded on demand).
+- **vite-plugin-pwa** — installable app + offline shell.
+- **@zxing/browser** — barcode-scanner fallback (loaded on demand, `barcode` feature only).
+- Dev: **vitest**, **@playwright/test**, **firebase-tools** (emulators),
+  **@firebase/rules-unit-testing**, **fake-indexeddb**.
 
 ## Deployment
 
 Deployed to GitHub Pages via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml) on
-every push to `main` (the Vite `base` is `/clothing-footwear-shop/`).
+every push to `main` (the Vite `base` is `/clothing-footwear-shop/`), after the `ci` job (lint,
+unit tests, build) passes. Security rules are **not** deployed by the workflow — deploy them
+yourself with `firebase deploy --only database,storage` after running the in-app data check.

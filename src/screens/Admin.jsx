@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { DataCheck, ErrorReports } from "./AdminHealth.jsx";
 import { featureOn } from "../config/features.js";
 import { StaffAccounts } from "./StaffAccounts.jsx";
 import { normName } from "../lib/domain.js";
@@ -19,7 +20,7 @@ import { S } from "../ui/styles.js";
 // ---------- Admin (password-gated bulk / destructive operations) ----------
 // Every action requires: confirm → confirm again → re-enter the account password
 // (verified against Firebase Auth). Only on a successful re-auth does the action run.
-export function Admin({ items, setSales, setExpenses, setLogs, user, notify, log }) {
+export function Admin({ items, setSales, setExpenses, setLogs, user, notify, log, sales = [] }) {
   const [pending, setPending] = useState(null); // the chosen operation
   const [step, setStep] = useState(1); // 1 = first confirm, 2 = password
   const [pwd, setPwd] = useState("");
@@ -224,6 +225,8 @@ export function Admin({ items, setSales, setExpenses, setLogs, user, notify, log
         sub="Bulk & destructive operations · double-confirm + password required"
       />
       {featureOn("staffAccounts") && <StaffAccounts notify={notify} log={log} />}
+      <ErrorReports notify={notify} />
+      <DataCheck items={items} sales={sales} />
       {groups.map((grp) => (
         <section key={grp} style={{ ...S.panel, marginBottom: 16 }}>
           <div

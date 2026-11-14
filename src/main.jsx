@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import App from "./clothing-footwear-shop.jsx";
 import { UpdatePrompt } from "./ui/UpdatePrompt.jsx";
 import { LangProvider } from "./i18n/index.jsx";
+import { reportError, installGlobalErrorReporting } from "./lib/reporter.js";
+
+installGlobalErrorReporting();
 
 // ----------------------------------------------------------------------------
 // Error boundary — without this, any render-time exception unmounts the whole
@@ -16,6 +19,11 @@ class ErrorBoundary extends Component {
   }
   componentDidCatch(error, info) {
     console.error("App crashed:", error, info);
+    // So the owner can see it from another device (Admin → Error reports).
+    reportError("crash", error, {
+      where: "ErrorBoundary",
+      component: info && info.componentStack ? String(info.componentStack).trim() : "",
+    });
   }
   render() {
     if (this.state.error) {
@@ -30,8 +38,9 @@ class ErrorBoundary extends Component {
         >
           <h1 style={{ fontSize: 22, color: "#C44536" }}>Something went wrong</h1>
           <p style={{ color: "#445", lineHeight: 1.5 }}>
-            The app hit an unexpected error. Your saved store data is safe on this device. Try
-            reloading; if it keeps happening, the details below help with debugging.
+            The app hit an unexpected error. Your saved store data is safe on this device, and the
+            error has been reported to the shop owner. Try reloading; if it keeps happening, the
+            details below help with debugging.
           </p>
           <pre
             style={{
