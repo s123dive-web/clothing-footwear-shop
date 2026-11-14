@@ -22,8 +22,8 @@ export const PIE_COLORS = [
   "#C44536",
   "#7A5AB0",
   "#3DA17A",
-  "#B0762A",
-  "#8A9C90",
+  "#8A5A12",
+  "#5C6E63",
 ];
 export const inrTick = (v) =>
   "₹" + (Math.abs(v) >= 1000 ? (v / 1000).toFixed(v % 1000 ? 1 : 0) + "k" : v);
@@ -262,6 +262,10 @@ export function buildWeekly(sales, from, to) {
 
 // Period options for the Dashboard "over time" charts. Each computes the from-date
 // relative to today; the range end is always today.
+// Legend labels in the body text colour: recharts would otherwise print them in the series
+// colour, and the gold/blue series are too pale to read as text.
+export const legendText = (value) => <span style={{ color: "#33443B" }}>{value}</span>;
+
 export const DASH_PERIODS = [
   ["7d", "Last 7 days", (d) => d.setDate(d.getDate() - 6)],
   ["14d", "Last 14 days", (d) => d.setDate(d.getDate() - 13)],
@@ -334,7 +338,7 @@ export const renderPayTrend = (series) => (
     />
     <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
     <Tooltip formatter={(v) => INR(v)} />
-    <Legend wrapperStyle={{ fontSize: 12 }} />
+    <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
     <Line
       type="monotone"
       dataKey="revenue"

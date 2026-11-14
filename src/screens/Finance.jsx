@@ -8,6 +8,7 @@ import {
   renderPayTrend,
   inrTick,
   PIE_COLORS,
+  legendText,
 } from "../ui/charts.jsx";
 import { money, todayStr, INR } from "../lib/format.js";
 import { Header, Card, Empty } from "../ui/index.jsx";
@@ -88,7 +89,7 @@ export function Finance({ sales, expenses }) {
 
       {preset === "custom" && (
         <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          <label style={{ fontSize: 12, color: "#6B7E74" }}>
+          <label style={{ fontSize: 12, color: "#556A5F" }}>
             From{" "}
             <input
               type="date"
@@ -99,7 +100,7 @@ export function Finance({ sales, expenses }) {
               onChange={(e) => setCfrom(e.target.value)}
             />
           </label>
-          <label style={{ fontSize: 12, color: "#6B7E74" }}>
+          <label style={{ fontSize: 12, color: "#556A5F" }}>
             To{" "}
             <input
               type="date"
@@ -178,7 +179,7 @@ export function Finance({ sales, expenses }) {
             />
             <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
             <Tooltip formatter={(v) => INR(v)} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
             <Area
               type="monotone"
               dataKey="revenue"
@@ -241,7 +242,7 @@ export function Finance({ sales, expenses }) {
             />
             <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
             <Tooltip formatter={(v) => INR(v)} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
             <Bar dataKey="revenue" name="Revenue" fill="#1B5E43" radius={[3, 3, 0, 0]} />
             <Bar dataKey="expenses" name="Expenses" fill="#C44536" radius={[3, 3, 0, 0]} />
           </BarChart>

@@ -4,7 +4,16 @@ import { test, expect } from "@playwright/test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { resetEmulator, login, gotoTab, records, eventually, dbPut, dbGet } from "./helpers.js";
+import {
+  resetEmulator,
+  login,
+  gotoTab,
+  records,
+  eventually,
+  dbPut,
+  dbGet,
+  dialogClick,
+} from "./helpers.js";
 
 const iso = (d) =>
   `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -57,10 +66,9 @@ const SALES = {
   },
 };
 
-test.beforeEach(async ({ page }) => {
+test.beforeEach(async () => {
   await resetEmulator();
   await dbPut("shop/sales", SALES);
-  page.on("dialog", (d) => d.accept());
 });
 
 test("only recent bills load by default; older ones load on request", async ({ page }) => {
@@ -144,6 +152,7 @@ test("backup contains every bill, and restore replaces every bill", async ({ pag
   await page.reload(); // back to the default window before restoring
   await expect(page.getByText("Online · syncing live")).toBeVisible();
   await page.locator('nav.nav input[type="file"]').setInputFiles(small);
+  await dialogClick(page, "Restore backup", "Replace everything");
   await expect(page.getByText("Backup restored")).toBeVisible();
   await eventually(async () => expect(Object.keys(await dbGet("shop/sales"))).toEqual(["recent1"]));
   fs.rmSync(file, { force: true });

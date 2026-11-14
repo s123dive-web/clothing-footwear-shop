@@ -9,6 +9,7 @@ import {
 } from "../lib/catalog.js";
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, useRef, memo } from "react";
+import { confirmDialog, alertDialog } from "../ui/dialogs.jsx";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { normName, iconFor } from "../lib/domain.js";
 import {
@@ -54,7 +55,7 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) 
           <div style={{ fontWeight: 800, fontSize: 15 }}>
             {i.name} {low && <span style={S.badgeInline}>low</span>}
           </div>
-          <div style={{ fontSize: 12, color: "#8A9C90", marginTop: 1 }}>
+          <div style={{ fontSize: 12, color: "#5C6E63", marginTop: 1 }}>
             {[i.brand, i.category, i.subcategory].filter(Boolean).join(" · ")}
             {i.code ? ` · #${i.code}` : ""}
           </div>
@@ -73,7 +74,7 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) 
             {INR(i.sellingPrice)}
           </div>
           {Number(i.mrp) > Number(i.sellingPrice) && (
-            <div style={{ fontSize: 11.5, color: "#9AA", textDecoration: "line-through" }}>
+            <div style={{ fontSize: 11.5, color: "#5F6B6B", textDecoration: "line-through" }}>
               MRP {INR(i.mrp)}
             </div>
           )}
@@ -147,9 +148,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
     );
     if (
       dup &&
-      !confirm(
-        `A "${product.name}" already exists in ${product.subcategory}. Save anyway as a separate product?`
-      )
+      !(await confirmDialog({
+        title: "Duplicate product",
+        message: `A "${product.name}" already exists in ${product.subcategory}. Save anyway as a separate product?`,
+        confirmLabel: "Save anyway",
+      }))
     )
       return;
     try {
@@ -167,11 +170,25 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
   };
 
   const del = async (product) => {
-    if (!confirm(`Delete “${product.name}” and all its variants? This can't be undone.`)) return;
+    // Reversible → no "are you sure?"; a 5-second Undo puts the product (and its stock) back.
     try {
       await cloudDeleteProduct(product.id);
       log("inventory", `Deleted “${product.name}”`);
-      notify("Product deleted");
+      notify("Product deleted", {
+        action: {
+          label: "Undo",
+          run: async () => {
+            try {
+              await cloudWriteProduct(product);
+              log("inventory", `Restored “${product.name}”`);
+              notify("Product restored");
+            } catch (e) {
+              console.error("restore product failed", e);
+              notify("⚠ Couldn't restore the product.");
+            }
+          },
+        },
+      });
     } catch (e) {
       console.error("delete failed", e);
       notify("⚠ Couldn't delete the product.");
@@ -217,6 +234,7 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         <input
           className="input"
           style={{ flex: "1 1 220px", minWidth: 0 }}
+          aria-label="Search name / brand / code"
           placeholder="Search name / brand / code…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -245,6 +263,7 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         <select
           className="input"
           style={{ width: "auto" }}
+          aria-label="Filter by subcategory"
           value={sub}
           onChange={(e) => setSub(e.target.value)}
         >
@@ -336,13 +355,17 @@ export function RestockModal({ product, onRestock, onClose }) {
               <div style={{ flex: 1 }}>
                 <ColorDot color={v.color} />
                 {variantLabel(v)}{" "}
-                <span style={{ color: "#9AA", fontSize: 12 }}>· {Number(v.stockQty) || 0} now</span>
+                <span style={{ color: "#5F6B6B", fontSize: 12 }}>
+                  · {Number(v.stockQty) || 0} now
+                </span>
               </div>
               <input
                 className="input"
                 style={{ width: 90 }}
                 type="number"
+                inputMode="decimal"
                 min="1"
+                aria-label="qty"
                 placeholder="+ qty"
                 value={qty[v.id] || ""}
                 onChange={(e) => setQty((s) => ({ ...s, [v.id]: e.target.value }))}
@@ -445,10 +468,10 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
   };
 
   const submit = () => {
-    if (!f.name.trim()) return alert("Product name is required.");
-    if (!(Number(f.sellingPrice) > 0)) return alert("Enter a selling price greater than 0.");
+    if (!f.name.trim()) return alertDialog("Product name is required.");
+    if (!(Number(f.sellingPrice) > 0)) return alertDialog("Enter a selling price greater than 0.");
     const variants = (f.variants || []).filter((v) => v.size || v.color || Number(v.stockQty) > 0);
-    if (variants.length === 0) return alert("Add at least one size/colour variant.");
+    if (variants.length === 0) return alertDialog("Add at least one size/colour variant.");
     onSave({
       ...f,
       name: f.name.trim(),
@@ -522,10 +545,10 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
             <select
               className="input"
               value={f.subcategory}
-              onChange={(e) => {
+              onChange={async (e) => {
                 touchedSub.current = true;
                 if (e.target.value === "__add") {
-                  const nm = onAddCategory && onAddCategory();
+                  const nm = onAddCategory && (await onAddCategory());
                   if (nm) setF((s) => ({ ...s, subcategory: nm }));
                 } else set("subcategory")(e);
               }}
@@ -546,6 +569,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={f.purchasePrice}
@@ -557,6 +581,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={f.sellingPrice}
@@ -567,6 +592,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             step="0.01"
             value={f.mrp}
@@ -577,6 +603,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             type="number"
+            inputMode="decimal"
             min="0"
             max="100"
             step="0.1"
@@ -621,7 +648,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           Quick-add variants (size × colour)
         </div>
         <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: 11, color: "#889", marginBottom: 3 }}>Sizes</div>
+          <div style={{ fontSize: 11, color: "#5E5E72", marginBottom: 3 }}>Sizes</div>
           {sizeOptions.map((sz) => (
             <button
               key={sz}
@@ -633,7 +660,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           ))}
         </div>
         <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: 11, color: "#889", marginBottom: 3 }}>Colours</div>
+          <div style={{ fontSize: 11, color: "#5E5E72", marginBottom: 3 }}>Colours</div>
           {COLOR_SWATCHES.slice(0, 12).map((c) => (
             <button
               key={c.name}
@@ -647,6 +674,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             style={{ width: 160, marginTop: 6, display: "inline-block" }}
+            aria-label="Other colours, comma-sep"
             placeholder="Other colours, comma-sep"
             value={genColorText}
             onChange={(e) => setGenColorText(e.target.value)}
@@ -666,7 +694,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
       >
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
           <thead>
-            <tr style={{ background: "#FAF6F8", textAlign: "left", color: "#889" }}>
+            <tr style={{ background: "#FAF6F8", textAlign: "left", color: "#5E5E72" }}>
               <th style={{ padding: "6px 8px" }}>Size</th>
               <th style={{ padding: "6px 8px" }}>Colour</th>
               <th style={{ padding: "6px 8px" }}>Stock</th>
@@ -681,6 +709,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                   <input
                     className="input"
                     style={{ padding: "5px 7px", width: 78 }}
+                    aria-label={"Size of variant " + (f.variants.indexOf(v) + 1)}
                     list={"sizes-" + f.category}
                     value={v.size}
                     onChange={(e) => setVar(v.id, "size", e.target.value)}
@@ -690,6 +719,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                   <input
                     className="input"
                     style={{ padding: "5px 7px", width: 96 }}
+                    aria-label={"Colour of variant " + (f.variants.indexOf(v) + 1)}
                     list="color-list"
                     value={v.color}
                     onChange={(e) => setVar(v.id, "color", e.target.value)}
@@ -700,7 +730,9 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                     className="input"
                     style={{ padding: "5px 7px", width: 64 }}
                     type="number"
+                    inputMode="decimal"
                     min="0"
+                    aria-label={"Stock of variant " + (f.variants.indexOf(v) + 1)}
                     value={v.stockQty}
                     onChange={(e) => setVar(v.id, "stockQty", e.target.value)}
                   />
@@ -710,7 +742,9 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                     className="input"
                     style={{ padding: "5px 7px", width: 56 }}
                     type="number"
+                    inputMode="decimal"
                     min="0"
+                    aria-label={"Low-stock level of variant " + (f.variants.indexOf(v) + 1)}
                     value={v.lowAt}
                     onChange={(e) => setVar(v.id, "lowAt", e.target.value)}
                   />

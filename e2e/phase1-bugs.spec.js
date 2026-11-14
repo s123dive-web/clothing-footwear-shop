@@ -167,7 +167,6 @@ test("BUG 4b · delete bill + stock restore are atomic: tab killed right after D
   page,
   context,
 }) => {
-  page.on("dialog", (d) => d.accept());
   await cartWithTwo(page);
   await completeBtn(page).click();
   await expect(page.getByText(/Bill saved/)).toBeVisible();
@@ -277,7 +276,6 @@ test("BUG 6 · a custom subcategory added on one device appears on another", asy
   browser,
 }) => {
   const NAME = "Lehenga Special";
-  page.on("dialog", (d) => (d.type() === "prompt" ? d.accept(NAME) : d.accept()));
   await login(page);
   await gotoTab(page, "Inventory");
   await page
@@ -285,7 +283,10 @@ test("BUG 6 · a custom subcategory added on one device appears on another", asy
     .first()
     .click();
   const dlg = page.getByRole("dialog", { name: "Add product" });
-  await dlg.getByLabel("Subcategory").selectOption("__add"); // "+ Add subcategory…" → prompt()
+  await dlg.getByLabel("Subcategory").selectOption("__add"); // "+ Add subcategory…" → in-app prompt
+  const ask = page.getByRole("dialog", { name: "New subcategory" });
+  await ask.getByLabel("Subcategory name").fill(NAME);
+  await ask.getByRole("button", { name: "Add", exact: true }).click();
   await expect(page.getByText(`Subcategory “${NAME}” added.`)).toBeVisible();
   await sleep(1500);
 
@@ -335,7 +336,6 @@ test("edit bill: lowering a quantity returns exactly that stock and updates the 
 test("offline: delete a bill, reopen online → bill gone and stock restored once", async ({
   page,
 }) => {
-  page.on("dialog", (d) => d.accept());
   await cartWithTwo(page);
   await completeBtn(page).click();
   await eventually(async () => expect(await variantStock(KURTI.name)).toEqual(SOLD_2M));
@@ -352,7 +352,7 @@ test("offline: delete a bill, reopen online → bill gone and stock restored onc
     .click();
   await page.getByRole("button", { name: "🗑 Delete" }).click();
   await expect(page.getByText("No sales yet.")).toBeVisible();
-  await expect(page.getByText(/Offline · \d+ changes? waiting to sync/)).toBeVisible();
+  await expect(page.getByText(/Offline · .*waiting to sync/)).toBeVisible();
   // Stock shown on this device already reflects the pending restore.
   await gotoTab(page, "Inventory");
   await expect(page.locator("main section").filter({ hasText: KURTI.name })).toContainText(

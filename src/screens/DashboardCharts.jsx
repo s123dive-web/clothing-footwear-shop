@@ -14,6 +14,7 @@ import {
   renderPayMix,
   renderPayTrend,
   barLabel,
+  legendText,
 } from "../ui/charts.jsx";
 import {
   AreaChart,
@@ -164,7 +165,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
           margin: "22px 0 8px",
         }}
       >
-        Monthly overview <span style={{ fontWeight: 500, color: "#8A9C90" }}>(from May 2026)</span>
+        Monthly overview <span style={{ fontWeight: 500, color: "#5C6E63" }}>(from May 2026)</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <ChartCard title="Monthly revenue" height={220}>
@@ -205,7 +206,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
             <XAxis dataKey="label" tick={{ fontSize: 11, fill: "#678" }} />
             <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
             <Tooltip formatter={(v) => INR(v)} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
             <Bar
               dataKey="revenue"
               name="Revenue"
@@ -239,6 +240,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
         <select
           className="input"
           style={{ width: "auto" }}
+          aria-label="Period"
           value={period}
           onChange={(e) => setPeriod(e.target.value)}
         >
@@ -258,7 +260,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
               max={customTo || todayStr()}
               onChange={(e) => setCustomFrom(e.target.value)}
             />
-            <span style={{ color: "#8A9C90" }}>to</span>
+            <span style={{ color: "#5C6E63" }}>to</span>
             <input
               type="date"
               className="input"
@@ -269,7 +271,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
             />
           </>
         )}
-        {rangeLabel && <span style={{ fontSize: 12, color: "#8A9C90" }}>{rangeLabel}</span>}
+        {rangeLabel && <span style={{ fontSize: 12, color: "#5C6E63" }}>{rangeLabel}</span>}
       </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, color: "#4A5D52", margin: "10px 0 6px" }}>
@@ -317,7 +319,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
             />
             <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
             <Tooltip formatter={(v) => INR(v)} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
             <Bar dataKey="revenue" name="Revenue" fill="#1B5E43" radius={[3, 3, 0, 0]} />
             <Bar dataKey="profit" name="Profit" fill="#E8A33D" radius={[3, 3, 0, 0]} />
           </BarChart>
@@ -325,7 +327,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
       </div>
 
       <div style={{ fontSize: 12, fontWeight: 700, color: "#4A5D52", margin: "18px 0 6px" }}>
-        Week wise <span style={{ fontWeight: 500, color: "#8A9C90" }}>(week starting Mon)</span>
+        Week wise <span style={{ fontWeight: 500, color: "#5C6E63" }}>(week starting Mon)</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
         <ChartCard title="Week wise revenue" height={220}>
@@ -381,7 +383,7 @@ export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, load
             />
             <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
             <Tooltip formatter={(v) => INR(v)} labelFormatter={(l) => "Week of " + l} />
-            <Legend wrapperStyle={{ fontSize: 12 }} />
+            <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
             <Bar dataKey="revenue" name="Revenue" fill="#1B5E43" radius={[3, 3, 0, 0]} />
             <Bar dataKey="profit" name="Profit" fill="#E8A33D" radius={[3, 3, 0, 0]} />
           </BarChart>

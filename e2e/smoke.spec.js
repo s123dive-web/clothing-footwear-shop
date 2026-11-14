@@ -16,6 +16,7 @@ import {
   records,
   eventually,
   dbPut,
+  dialogClick,
   receiptHtml,
 } from "./helpers.js";
 
@@ -53,7 +54,12 @@ async function sellKurti(page, { qty = 2, pay = "UPI", customer, paidNow } = {})
 
 test.beforeEach(async ({ page }) => {
   await resetEmulator();
-  page.on("dialog", (d) => d.accept()); // native confirm()/alert() — accept by default
+  // Phase 3 replaced every native confirm()/prompt()/alert() with in-app dialogs. A native one
+  // appearing now is a regression.
+  page.on("dialog", (d) => {
+    d.dismiss();
+    throw new Error("unexpected native dialog: " + d.message());
+  });
 });
 
 test("1 · login → dashboard renders", async ({ page }) => {
@@ -137,8 +143,9 @@ test("4 · delete that bill → stock restored", async ({ page }) => {
 
   await gotoTab(page, "Sales History");
   await billRow(page, "₹1,000").click();
-  await page.getByRole("button", { name: "🗑 Delete" }).click(); // confirm() auto-accepted
+  await page.getByRole("button", { name: "🗑 Delete" }).click(); // no confirm — Undo toast
   await expect(page.getByText("Bill deleted, stock restored")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Undo" })).toBeVisible();
   await expect(page.getByText("No sales yet.")).toBeVisible();
 
   await eventually(async () => {
@@ -216,12 +223,15 @@ test("6 · JSON export → empty emulator → import → same counts", async ({ 
   expect(await records("sales")).toHaveLength(0);
   const ctx = await browser.newContext();
   const fresh = await ctx.newPage();
-  fresh.on("dialog", (d) => d.accept()); // "Restore this backup? It will REPLACE all current data…"
   await login(fresh);
   await gotoTab(fresh, "Inventory");
   await expect(fresh.getByText("No products yet.")).toBeVisible();
 
   await fresh.locator('nav.nav input[type="file"]').setInputFiles(file);
+  // "Restore this backup? It will REPLACE all current data…" — destructive, in-app, Cancel default
+  const restore = fresh.getByRole("dialog", { name: "Restore backup" });
+  await expect(restore.getByRole("button", { name: "Cancel" })).toBeFocused();
+  await dialogClick(fresh, "Restore backup", "Replace everything");
   await expect(fresh.getByText("Backup restored")).toBeVisible();
 
   await eventually(async () => {

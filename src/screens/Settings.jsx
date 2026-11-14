@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { S } from "../ui/styles.js";
+import { LangSelect } from "../i18n/index.jsx";
 import { DEFAULT_SHOP_CONFIG, validateConfig } from "../config/shopConfig.js";
 import { Header, Section, Field } from "../ui/index.jsx";
 
@@ -48,6 +50,17 @@ export function Settings({ config, onSave, notify }) {
   return (
     <div>
       <Header title="Settings" sub="Shop identity — shown in the header, receipts, and reports" />
+      <section
+        style={{ ...S.panel, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}
+      >
+        <label htmlFor="lang-setting" style={{ fontWeight: 700, fontSize: 13.5 }}>
+          🌐 Language / भाषा
+        </label>
+        <LangSelect id="lang-setting" style={{ width: "auto", minWidth: 160 }} />
+        <span style={{ fontSize: 12, color: "#556A5F" }}>
+          Menus, Billing and the printed receipt. Saved on this device.
+        </span>
+      </section>
       <div style={{ maxWidth: 720 }}>
         <Section title="Shop details">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
@@ -140,7 +153,7 @@ export function Settings({ config, onSave, notify }) {
                   background: "#F4F7F4",
                   display: "grid",
                   placeItems: "center",
-                  color: "#9AA",
+                  color: "#5F6B6B",
                   fontSize: 24,
                 }}
               >
@@ -156,7 +169,7 @@ export function Settings({ config, onSave, notify }) {
                 Remove
               </button>
             )}
-            <span style={{ fontSize: 12, color: "#8A9C90" }}>PNG/JPG under 250 KB.</span>
+            <span style={{ fontSize: 12, color: "#5C6E63" }}>PNG/JPG under 250 KB.</span>
           </div>
         </Section>
 
@@ -175,6 +188,7 @@ export function Settings({ config, onSave, notify }) {
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="1"
                 max="15"
                 value={f.footwearSizeMin}
@@ -185,6 +199,7 @@ export function Settings({ config, onSave, notify }) {
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="1"
                 max="15"
                 value={f.footwearSizeMax}

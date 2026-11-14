@@ -288,7 +288,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
             />
           </label>
           <div
-            style={{ fontSize: 11.5, color: "#8A9C90", margin: "8px 0 14px", textAlign: "center" }}
+            style={{ fontSize: 11.5, color: "#5C6E63", margin: "8px 0 14px", textAlign: "center" }}
           >
             txt · csv · tsv · xls · xlsx · pdf · json
           </div>
@@ -297,6 +297,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
           </div>
           <textarea
             className="input"
+            aria-label="Paste data to import"
             rows={6}
             placeholder={
               mode === "inventory"
@@ -313,7 +314,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
             Process pasted data
           </button>
           {err && <div style={{ color: "#C44536", fontSize: 13, marginTop: 10 }}>{err}</div>}
-          <div style={{ fontSize: 11.5, color: "#8A9C90", marginTop: 12, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 11.5, color: "#5C6E63", marginTop: 12, lineHeight: 1.5 }}>
             {mode === "inventory"
               ? "Columns are auto-detected (name / qty / buy / sell). Each row becomes a product with one size/colour variant — set the size & colour in the preview. Existing names get more stock; new names create a product (subcategory guessed from the name; blank sell = buy + 40%)."
               : mode === "expenses"
@@ -331,7 +332,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                   fontWeight: 500,
                   textTransform: "none",
                   letterSpacing: 0,
-                  color: "#8A9C90",
+                  color: "#5C6E63",
                   marginLeft: 8,
                 }}
               >
@@ -354,7 +355,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
             <>
               {mode === "sales" && (
                 <label
-                  style={{ fontSize: 12, color: "#6B7E74", display: "block", marginBottom: 10 }}
+                  style={{ fontSize: 12, color: "#556A5F", display: "block", marginBottom: 10 }}
                 >
                   Sale date{" "}
                   <input
@@ -385,6 +386,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             value={r.name}
+                            aria-label="Example: Shop rent"
                             placeholder="e.g. Shop rent"
                             onChange={(e) => edit(i, "name", e.target.value)}
                           />
@@ -394,6 +396,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.amount}
@@ -477,6 +480,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 6px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             value={r.qty}
                             onChange={(e) => edit(i, "qty", +e.target.value)}
@@ -487,6 +491,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.buyPrice}
@@ -498,6 +503,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.sellPrice}
@@ -550,6 +556,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             value={r.qty}
                             onChange={(e) => edit(i, "qty", +e.target.value)}
@@ -560,6 +567,7 @@ export function RawData({ items, setSales, setExpenses, notify, log }) {
                             className="input"
                             style={{ padding: "6px 8px" }}
                             type="number"
+                            inputMode="decimal"
                             min="0"
                             step="0.01"
                             value={r.amount}

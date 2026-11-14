@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { confirmDialog } from "../ui/dialogs.jsx";
 import { usePagedLimit } from "../ui/hooks.js";
 import { Header, Empty } from "../ui/index.jsx";
 import { todayStr } from "../lib/format.js";
@@ -12,10 +13,10 @@ export const LOG_COLORS = {
   expense: "#C44536",
   import: "#7A5AB0",
   backup: "#7A6A1E",
-  bill: "#0E7C86",
+  bill: "#0B6770",
 };
 
-export function Logs({ logs, setLogs, notify }) {
+export function Logs({ logs, setLogs, notify, goBilling }) {
   const [date, setDate] = useState(""); // "" = all dates
   const [type, setType] = useState("all");
 
@@ -24,11 +25,15 @@ export function Logs({ logs, setLogs, notify }) {
   );
   const [limit, showMore] = usePagedLimit(200, date + "|" + type);
 
-  const clear = () => {
+  const clear = async () => {
     if (
-      confirm(
-        "Clear the entire activity log? This cannot be undone (it does not affect sales or stock)."
-      )
+      await confirmDialog({
+        title: "Clear activity log",
+        message:
+          "Clear the entire activity log? This cannot be undone (it does not affect sales or stock).",
+        confirmLabel: "Clear log",
+        danger: true,
+      })
     ) {
       setLogs([]);
       notify("Activity log cleared");
@@ -49,7 +54,7 @@ export function Logs({ logs, setLogs, notify }) {
       </Header>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-        <label style={{ fontSize: 12, color: "#6B7E74" }}>
+        <label style={{ fontSize: 12, color: "#556A5F" }}>
           Day{" "}
           <input
             type="date"
@@ -63,6 +68,7 @@ export function Logs({ logs, setLogs, notify }) {
         <select
           className="input"
           style={{ width: 180 }}
+          aria-label="Filter by activity type"
           value={type}
           onChange={(e) => setType(e.target.value)}
         >
@@ -94,7 +100,25 @@ export function Logs({ logs, setLogs, notify }) {
                 ? "No activity yet. Actions you take in the app will appear here."
                 : "No activity matches this filter."
             }
-          />
+          >
+            {logs.length === 0 ? (
+              goBilling && (
+                <button className="btn primary" onClick={goBilling}>
+                  Start billing
+                </button>
+              )
+            ) : (
+              <button
+                className="btn"
+                onClick={() => {
+                  setDate("");
+                  setType("all");
+                }}
+              >
+                Show all activity
+              </button>
+            )}
+          </Empty>
         ) : (
           <table className="tbl">
             <thead>
@@ -107,8 +131,8 @@ export function Logs({ logs, setLogs, notify }) {
             <tbody>
               {filtered.slice(0, limit).map((l) => (
                 <tr key={l.id}>
-                  <td style={{ whiteSpace: "nowrap", color: "#677" }}>
-                    {l.date} <span style={{ color: "#9AA" }}>{l.time}</span>
+                  <td style={{ whiteSpace: "nowrap", color: "#566" }}>
+                    {l.date} <span style={{ color: "#5F6B6B" }}>{l.time}</span>
                   </td>
                   <td>
                     <span

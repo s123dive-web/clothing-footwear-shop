@@ -77,7 +77,13 @@ export function Alerts({ items, goInventory }) {
 
       <section style={S.panel}>
         {list.length === 0 ? (
-          <Empty text="Nothing here — stock looks healthy." />
+          <Empty text="Nothing here — stock looks healthy.">
+            {goInventory && (
+              <button className="btn primary" onClick={goInventory}>
+                Open Inventory
+              </button>
+            )}
+          </Empty>
         ) : (
           <table className="tbl">
             <thead>
@@ -96,7 +102,7 @@ export function Alerts({ items, goInventory }) {
                     <span style={{ marginRight: 6 }}>{iconFor(r.p)}</span>
                     {r.p.name}
                   </td>
-                  <td style={{ color: "#677" }}>
+                  <td style={{ color: "#566" }}>
                     {[r.p.category, r.p.subcategory].filter(Boolean).join(" · ")}
                   </td>
                   <td>
@@ -107,12 +113,12 @@ export function Alerts({ items, goInventory }) {
                     style={{
                       textAlign: "right",
                       fontWeight: 800,
-                      color: r.qty <= 0 ? "#C44536" : "#B0762A",
+                      color: r.qty <= 0 ? "#C44536" : "#8A5A12",
                     }}
                   >
                     {r.qty}
                   </td>
-                  <td style={{ textAlign: "right", color: "#789" }}>{r.lowAt}</td>
+                  <td style={{ textAlign: "right", color: "#586878" }}>{r.lowAt}</td>
                 </tr>
               ))}
             </tbody>

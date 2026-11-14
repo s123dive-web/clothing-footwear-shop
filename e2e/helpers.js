@@ -159,6 +159,13 @@ export async function unblockDatabase(page) {
   await page.routeWebSocket(/127\.0\.0\.1:9000/, (ws) => ws.connectToServer());
 }
 
+/** Answer the in-app confirm / prompt dialog (src/ui/dialogs.jsx) by clicking a button in it. */
+export async function dialogClick(page, dialogTitle, buttonName) {
+  const dlg = page.getByRole("dialog", { name: dialogTitle });
+  await dlg.getByRole("button", { name: buttonName, exact: true }).click();
+  await dlg.waitFor({ state: "hidden" });
+}
+
 /**
  * Click something that prints a receipt and return the receipt HTML. Receipts are printed from a
  * hidden iframe that removes itself as soon as printing finishes, so its srcdoc is captured the

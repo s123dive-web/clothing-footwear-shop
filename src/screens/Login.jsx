@@ -1,5 +1,6 @@
 import { loadCachedConfig, DEFAULT_SHOP_CONFIG } from "../config/shopConfig.js";
 import { useState } from "react";
+import { useLang, LangSelect } from "../i18n/index.jsx";
 import { signInWithEmailAndPassword, sendPasswordResetEmail } from "firebase/auth";
 import { auth } from "../config/firebase.js";
 import { CSS } from "../ui/styles.js";
@@ -22,6 +23,7 @@ export const AUTH_ERRORS = {
 export const authMessage = (code) => AUTH_ERRORS[code] || "Could not sign in. Please try again.";
 
 export function Login() {
+  const { t } = useLang();
   // The Realtime DB config is locked behind auth, so on the sign-in screen we can only use
   // whatever was cached from a previous session (falling back to defaults for a fresh device).
   const cfg = loadCachedConfig() || DEFAULT_SHOP_CONFIG;
@@ -90,11 +92,11 @@ export function Login() {
             <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>
               {cfg.name}
             </div>
-            <div style={{ fontSize: 11.5, color: "#8A9C90" }}>{cfg.address || cfg.tagline}</div>
+            <div style={{ fontSize: 11.5, color: "#5C6E63" }}>{cfg.address || cfg.tagline}</div>
           </div>
         </div>
-        <h2 style={{ fontSize: 16, margin: "18px 0 12px" }}>Sign in</h2>
-        <Field label="Email">
+        <h2 style={{ fontSize: 16, margin: "18px 0 12px" }}>{t("Sign in")}</h2>
+        <Field label={t("Email")}>
           <input
             className="input"
             type="email"
@@ -104,7 +106,7 @@ export function Login() {
             onChange={(e) => setEmail(e.target.value)}
           />
         </Field>
-        <Field label="Password">
+        <Field label={t("Password")}>
           <input
             className="input"
             type="password"
@@ -116,7 +118,7 @@ export function Login() {
         {err && <div style={{ color: "#C44536", fontSize: 13, marginBottom: 8 }}>{err}</div>}
         {info && <div style={{ color: "#1B5E43", fontSize: 13, marginBottom: 8 }}>{info}</div>}
         <button className="btn primary big" type="submit" style={{ width: "100%" }} disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
+          {busy ? t("Signing in…") : t("Sign in")}
         </button>
         <button
           type="button"
@@ -127,16 +129,21 @@ export function Login() {
             border: "none",
             color: "#1B5E43",
             fontSize: 12,
-            marginTop: 10,
+            marginTop: 4,
             cursor: "pointer",
-            padding: 0,
+            padding: "0 4px",
+            minHeight: 44,
+            textAlign: "left",
           }}
         >
-          Forgot password? Email me a reset link
+          {t("Forgot password? Email me a reset link")}
         </button>
-        <div style={{ fontSize: 11, color: "#8A9C90", marginTop: 12, lineHeight: 1.5 }}>
-          Sign in with your shop account. Your data syncs live across every device that signs in.
+        <div style={{ fontSize: 11, color: "#5C6E63", marginTop: 12, lineHeight: 1.5 }}>
+          {t(
+            "Sign in with your shop account. Your data syncs live across every device that signs in."
+          )}
         </div>
+        <LangSelect style={{ marginTop: 12 }} />
       </form>
     </div>
   );

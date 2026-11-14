@@ -2,6 +2,7 @@ import { StrictMode, Component } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./clothing-footwear-shop.jsx";
 import { UpdatePrompt } from "./ui/UpdatePrompt.jsx";
+import { LangProvider } from "./i18n/index.jsx";
 
 // ----------------------------------------------------------------------------
 // Error boundary — without this, any render-time exception unmounts the whole
@@ -84,7 +85,9 @@ if (!window.storage) {
 createRoot(document.getElementById("root")).render(
   <StrictMode>
     <ErrorBoundary>
-      <App />
+      <LangProvider>
+        <App />
+      </LangProvider>
     </ErrorBoundary>
     <UpdatePrompt />
   </StrictMode>

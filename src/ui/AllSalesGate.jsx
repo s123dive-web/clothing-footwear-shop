@@ -1,7 +1,7 @@
 // Wraps a screen that needs EVERY bill (Reports, Admin). The app normally holds only recent
 // bills (lib/salesWindow.js); this fetches the rest once — not live — before showing the screen.
 import { useEffect, useState } from "react";
-import { Empty } from "./index.jsx";
+import { Empty, PageSkeleton } from "./index.jsx";
 
 export function AllSalesGate({ salesFrom, loadOlderSales, allowPartial = false, children }) {
   const all = salesFrom === null;
@@ -33,5 +33,5 @@ export function AllSalesGate({ salesFrom, loadOlderSales, allowPartial = false, 
         )}
       </Empty>
     );
-  return <div style={{ padding: 40, color: "#667" }}>Loading full sales history…</div>;
+  return <PageSkeleton label="Loading full sales history…" />;
 }

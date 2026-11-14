@@ -1,5 +1,6 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, memo, useEffect } from "react";
+import { useLang } from "../i18n/index.jsx";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { money, INR, dateStr, todayStr, uid } from "../lib/format.js";
 import { Header, Empty, Modal, Field } from "../ui/index.jsx";
@@ -25,7 +26,7 @@ const BillRow = memo(function BillRow({
         <span>
           {s.time} · {s.lines.length} item{s.lines.length > 1 ? "s" : ""}
           {searching && (
-            <span style={{ marginLeft: 6, fontSize: 11, color: "#8A9C90" }}>
+            <span style={{ marginLeft: 6, fontSize: 11, color: "#5C6E63" }}>
               {new Date(s.date + "T00:00").toLocaleDateString("en-IN", {
                 day: "numeric",
                 month: "short",
@@ -38,7 +39,7 @@ const BillRow = memo(function BillRow({
                 marginLeft: 8,
                 fontSize: 10.5,
                 fontWeight: 800,
-                color: PAY_COLORS[s.payment] || "#789",
+                color: PAY_COLORS[s.payment] || "#586878",
                 border: `1px solid ${PAY_COLORS[s.payment] || "#bbb"}`,
                 borderRadius: 6,
                 padding: "0 6px",
@@ -101,7 +102,7 @@ const BillRow = memo(function BillRow({
                   justifyContent: "space-between",
                   fontSize: 12.5,
                   padding: "2px 0",
-                  color: "#6B7E74",
+                  color: "#556A5F",
                 }}
               >
                 <span>Subtotal</span>
@@ -167,7 +168,10 @@ export function SalesHistory({
   log,
   salesFrom = null,
   loadOlderSales,
+  recordSale,
+  goBilling,
 }) {
+  const { t } = useLang();
   const config = useShopConfig();
   const [open, setOpen] = useState(null);
   const [openDates, setOpenDates] = useState(() => new Set()); // expanded past dates (today is always open)
@@ -240,7 +244,7 @@ export function SalesHistory({
   const [dateLimit, showMoreDates] = usePagedLimit(DATES_PER_PAGE, dq + "|" + from + "|" + to);
   const [fullDates, setFullDates] = useState(() => new Set());
   const onToggle = useStableCallback((id) => setOpen((o) => (o === id ? null : id)));
-  const onPrint = useStableCallback((s) => printReceipt(s, config));
+  const onPrint = useStableCallback((s) => printReceipt(s, config, t));
   const onEdit = useStableCallback((s) => openEdit(s));
   const onSplit = useStableCallback((s) => openSplit(s));
   const onDelete = useStableCallback((s) => deleteSale(s));
@@ -250,11 +254,20 @@ export function SalesHistory({
   // are surfaced and retried, and a replay never adjusts stock twice. Lines without a
   // productId (misc, or legacy) touch no stock.
   const deleteSale = (s) => {
-    if (!confirm(`Delete this ${INR(s.total)} bill from ${s.date}? Stock will be added back.`))
-      return;
+    // Reversible → no "are you sure?"; a 5-second Undo re-creates the bill and takes the stock
+    // back out (a fresh outbox op, so it is as safe as the original sale).
     voidSale(s);
     log("sale", `Deleted bill ${INR(s.total)} (${s.date}) — stock restored`);
-    notify("Bill deleted, stock restored");
+    notify(t("Bill deleted, stock restored"), {
+      action: {
+        label: t("Undo"),
+        run: () => {
+          recordSale(s);
+          log("sale", `Restored deleted bill ${INR(s.total)} (${s.date})`);
+          notify(t("Bill restored"));
+        },
+      },
+    });
   };
 
   const openEdit = (s) =>
@@ -519,6 +532,7 @@ export function SalesHistory({
         <input
           className="input"
           style={{ flex: 1, minWidth: 0 }}
+          aria-label="Search bills"
           placeholder="🔍 Search bills — item, customer, mobile, amount, payment…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -539,7 +553,7 @@ export function SalesHistory({
           flexWrap: "wrap",
         }}
       >
-        <label style={{ fontSize: 12, color: "#6B7E74" }}>
+        <label style={{ fontSize: 12, color: "#556A5F" }}>
           From{" "}
           <input
             type="date"
@@ -550,7 +564,7 @@ export function SalesHistory({
             onChange={(e) => setFrom(e.target.value)}
           />
         </label>
-        <label style={{ fontSize: 12, color: "#6B7E74" }}>
+        <label style={{ fontSize: 12, color: "#556A5F" }}>
           To{" "}
           <input
             type="date"
@@ -576,7 +590,13 @@ export function SalesHistory({
 
       {sales.length === 0 && (
         <section style={S.panel}>
-          <Empty text="No sales yet. Bills will appear here after you complete a sale." />
+          <Empty text="No sales yet. Bills will appear here after you complete a sale.">
+            {goBilling && (
+              <button className="btn primary" onClick={goBilling}>
+                {t("Start billing")}
+              </button>
+            )}
+          </Empty>
         </section>
       )}
       {sales.length > 0 && visible.length === 0 && (
@@ -587,7 +607,18 @@ export function SalesHistory({
                 ? `No bills match “${q.trim()}”${from || to ? " in this date range" : ""}.`
                 : "No bills in this date range."
             }
-          />
+          >
+            <button
+              className="btn"
+              onClick={() => {
+                setQ("");
+                setFrom("");
+                setTo("");
+              }}
+            >
+              Clear search and dates
+            </button>
+          </Empty>
         </section>
       )}
       {byDate.slice(0, dateLimit).map(([date, list]) => {
@@ -603,7 +634,7 @@ export function SalesHistory({
               {...(isToday ? {} : { role: "button", "aria-expanded": expanded })}
             >
               {!isToday && (
-                <span style={{ color: "#8A9C90", marginRight: 6 }}>{expanded ? "▾" : "▸"}</span>
+                <span style={{ color: "#5C6E63", marginRight: 6 }}>{expanded ? "▾" : "▸"}</span>
               )}
               {new Date(date + "T00:00").toLocaleDateString("en-IN", {
                 weekday: "short",
@@ -614,7 +645,7 @@ export function SalesHistory({
               {isToday && (
                 <span style={{ fontWeight: 600, color: "#1B5E43", marginLeft: 8 }}>· Today</span>
               )}
-              <span style={{ fontWeight: 500, color: "#8A9C90", marginLeft: 8 }}>
+              <span style={{ fontWeight: 500, color: "#5C6E63", marginLeft: 8 }}>
                 · {list.length} bill{list.length > 1 ? "s" : ""}
               </span>
               <span style={{ marginLeft: "auto", fontWeight: 800 }}>
@@ -719,7 +750,7 @@ export function SalesHistory({
                 <tr key={idx}>
                   <td>
                     {l.name}
-                    <div style={{ fontSize: 11, color: "#9AA" }}>
+                    <div style={{ fontSize: 11, color: "#5F6B6B" }}>
                       {INR(l.price)}
                       {lineVariantText(l) ? " · " + lineVariantText(l) : ""}
                     </div>
@@ -729,7 +760,9 @@ export function SalesHistory({
                       className="input"
                       style={{ padding: "6px 8px" }}
                       type="number"
+                      inputMode="decimal"
                       min="0"
+                      aria-label={"Quantity of " + l.name}
                       value={l.qty}
                       onChange={(e) => editLine(idx, +e.target.value)}
                     />
@@ -754,6 +787,7 @@ export function SalesHistory({
             <input
               className="input"
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
               max={editSubtotal}
@@ -769,7 +803,7 @@ export function SalesHistory({
                   display: "flex",
                   justifyContent: "space-between",
                   fontSize: 12.5,
-                  color: "#6B7E74",
+                  color: "#556A5F",
                 }}
               >
                 <span>Subtotal</span>
@@ -808,6 +842,7 @@ export function SalesHistory({
                     className="input"
                     style={{ flex: 1 }}
                     type="number"
+                    inputMode="decimal"
                     min="0"
                     step="0.01"
                     max={editTotal}
@@ -832,7 +867,7 @@ export function SalesHistory({
                     marginBottom: 4,
                   }}
                 >
-                  <span style={{ fontSize: 11.5, color: "#6B7E74", fontWeight: 600 }}>
+                  <span style={{ fontSize: 11.5, color: "#556A5F", fontWeight: 600 }}>
                     Paid via
                   </span>
                   {["UPI", "Cash"].map((m) => (
@@ -851,7 +886,7 @@ export function SalesHistory({
               </div>
             </div>
           )}
-          <div style={{ fontSize: 11.5, color: "#6B7E74", marginTop: 4 }}>
+          <div style={{ fontSize: 11.5, color: "#556A5F", marginTop: 4 }}>
             Stock adjusts automatically for any quantity change.
           </div>
           <button
@@ -866,7 +901,7 @@ export function SalesHistory({
 
       {splitting && (
         <Modal title="Split bill across dates" onClose={() => setSplitting(null)}>
-          <div style={{ fontSize: 12.5, color: "#6B7E74", marginBottom: 10, lineHeight: 1.5 }}>
+          <div style={{ fontSize: 12.5, color: "#556A5F", marginBottom: 10, lineHeight: 1.5 }}>
             Original total <b>{INR(splitting.total)}</b>. Give each part a date and an amount — by
             default it's divided equally, but you can enter your own amounts. The parts must add up
             to exactly the original total. Profit and items are split in the same proportion, so the
@@ -884,7 +919,7 @@ export function SalesHistory({
               Split over a date range
             </div>
             <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-              <label style={{ fontSize: 12, color: "#6B7E74" }}>
+              <label style={{ fontSize: 12, color: "#556A5F" }}>
                 From{" "}
                 <input
                   type="date"
@@ -895,7 +930,7 @@ export function SalesHistory({
                   onChange={(e) => setRangeFrom(e.target.value)}
                 />
               </label>
-              <label style={{ fontSize: 12, color: "#6B7E74" }}>
+              <label style={{ fontSize: 12, color: "#556A5F" }}>
                 To{" "}
                 <input
                   type="date"
@@ -910,7 +945,7 @@ export function SalesHistory({
                 Fill range
               </button>
             </div>
-            <div style={{ fontSize: 11, color: "#8A9C90", marginTop: 6 }}>
+            <div style={{ fontSize: 11, color: "#5C6E63", marginTop: 6 }}>
               Creates one part per day in the range, divided equally — then edit any amount below.
             </div>
           </div>
@@ -938,6 +973,7 @@ export function SalesHistory({
                   <td>
                     <input
                       type="number"
+                      inputMode="decimal"
                       min="0"
                       step="0.01"
                       className="input"

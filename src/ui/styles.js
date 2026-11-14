@@ -152,6 +152,7 @@ export const CSS = `
   .navbtn:hover { background:#1A4A2E; color:#fff; }
   .navbtn.active { background:#1B5E43; color:#fff; }
   .navbtn.sub { padding-left:26px; font-size:13px; color:#A8C2B4; }
+  .navbtn.sub.active { color:#fff; }
   .navbtn.sub::before { content:""; position:absolute; left:14px; top:9px; bottom:9px; width:2px; background:#2A5A3E; border-radius:2px; }
   .input { width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #D5E0D6; border-radius:9px; font-size:14px; background:#fff; outline:none; font-family:inherit; }
   .input:focus { border-color:#1B5E43; box-shadow:0 0 0 3px rgba(27,94,67,.12); }
@@ -161,7 +162,7 @@ export const CSS = `
   .btn.big { padding:13px 18px; font-size:15px; }
   .btn.ghost { background:transparent; border:1.5px solid #CFDCD1; }
   .btn.small { padding:5px 10px; font-size:12px; }
-  .btn.danger { background:#FBEAE7; color:#C44536; }
+  .btn.danger { background:#FBEAE7; color:#A8281E; }
   .pick { text-align:left; background:#F6FAF6; border:1.5px solid #DDE8DE; border-radius:11px; padding:10px 12px; cursor:pointer; font-family:inherit; }
   .pick:hover:not(:disabled) { border-color:#1B5E43; background:#fff; }
   .pick:disabled { opacity:.7; cursor:not-allowed; background:#F0F2F0; }
@@ -172,10 +173,48 @@ export const CSS = `
   .chipbtn { display:inline-flex; align-items:center; gap:3px; border:1.5px solid #E1D4DA; background:#fff; color:#4A3A42; border-radius:16px; padding:4px 10px; font-size:12px; font-weight:600; cursor:pointer; margin:0 5px 5px 0; font-family:inherit; }
   .chipbtn.on { background:#8E2C48; color:#fff; border-color:#8E2C48; }
   .tbl { width:100%; border-collapse:collapse; font-size:13.5px; }
-  .tbl th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:#7A8C81; padding:6px 8px; border-bottom:2px solid #E2EAE3; }
+  .tbl th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:#5A6E63; padding:6px 8px; border-bottom:2px solid #E2EAE3; }
   .tbl td { padding:9px 8px; border-bottom:1px solid #EEF3EE; }
   .tbl tr:hover td { background:#F7FAF7; }
+  /* visible keyboard focus everywhere (inputs keep their own ring) */
+  button:focus-visible, a:focus-visible, select:focus-visible, [tabindex]:focus-visible, summary:focus-visible { outline:3px solid #0B57D0; outline-offset:2px; }
+  .nav button:focus-visible { outline-color:#FFD54A; }
+  .input:focus-visible { border-color:#1B5E43; box-shadow:0 0 0 3px rgba(27,94,67,.35); }
+  .skel { border-radius:8px; background:linear-gradient(90deg,#E9EFEA 25%,#F5F8F5 37%,#E9EFEA 63%); background-size:400% 100%; animation:skel 1.4s ease infinite; }
+  @keyframes skel { 0% { background-position:100% 50%; } 100% { background-position:0 50%; } }
+  @media (prefers-reduced-motion: reduce) { .skel { animation:none; } }
+  .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); white-space:nowrap; border:0; }
+  .sync-pill { display:none; }
+  .tap { min-width:44px; min-height:44px; }
+  .stepper { display:flex; align-items:center; gap:4px; }
+  .step { width:44px; height:44px; border-radius:10px; border:1.5px solid #CFC3C9; background:#fff; color:#3A2A32; font-size:22px; font-weight:700; line-height:1; cursor:pointer; font-family:inherit; }
+  .step:active { background:#F1ECEF; }
+  .quick-row { display:flex; gap:6px; overflow-x:auto; padding-bottom:8px; margin-bottom:6px; -webkit-overflow-scrolling:touch; }
+  .quick { flex:0 0 auto; min-height:44px; padding:0 12px; border-radius:22px; border:1.5px solid #E1D4DA; background:#FFF9EC; color:#3A2A32; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; font-family:inherit; }
+  .held { display:inline-flex; border:1.5px solid #D9C7CF; border-radius:10px; overflow:hidden; background:#fff; }
+  .held-main { min-height:44px; padding:0 12px; border:none; background:#FBF4F7; color:#5A2338; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; }
+  .held-x { min-width:44px; min-height:44px; border:none; border-left:1.5px solid #D9C7CF; background:#fff; color:#8A5566; font-size:14px; cursor:pointer; }
+  .bill-bar-total, .bill-bar-spacer { display:none; }
+  .toasts { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:90; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(560px, calc(100vw - 24px)); }
+  /* Touch devices and narrow screens: every control is at least 44 × 44 px. */
+  @media (pointer: coarse), (max-width: 820px) {
+    .btn, .navbtn, .seg, .chipbtn, .input, select.input, .pick { min-height:44px; }
+    .btn.small { min-width:44px; padding:8px 12px; font-size:13px; }
+    .seg, .chipbtn { min-width:44px; }
+    .chipbtn { padding:4px 14px; }
+    main a[href] { display:inline-flex; align-items:center; min-height:44px; }
+    input[type="checkbox"], input[type="radio"] { width:24px; height:24px; flex:0 0 auto; }
+    label:has(> input[type="checkbox"]), label:has(> input[type="radio"]) { min-height:44px; }
+  }
   @media (max-width: 820px) {
+    .toasts { bottom:calc(88px + env(safe-area-inset-bottom, 0px)); width:auto; left:12px; right:12px; transform:none; }
+    /* Sync state is always visible on a phone, not only at the bottom of the menu */
+    .sync-pill { display:inline-flex; align-items:center; gap:6px; position:fixed; top:8px; right:8px; z-index:45; min-height:32px; padding:0 12px; border-radius:16px; border:none; font-size:12.5px; font-weight:800; font-family:inherit; box-shadow:0 3px 10px rgba(0,0,0,.25); }
+    /* Billing: total + Complete pinned to the bottom of the phone screen */
+    .bill-bar { position:fixed; left:0; right:0; bottom:0; z-index:40; display:flex; align-items:center; gap:12px; background:#fff; border-top:1.5px solid #E1D4DA; box-shadow:0 -6px 18px rgba(0,0,0,.12); padding:10px 14px calc(10px + env(safe-area-inset-bottom, 0px)); }
+    .bill-bar-total { display:flex; flex-direction:column; min-width:96px; line-height:1.25; }
+    .bill-bar .btn.big { min-height:52px; }
+    .bill-bar-spacer { display:block; height:76px; }
     .app { flex-direction:column !important; }
     .nav { width:auto !important; height:auto !important; position:static !important;
            flex-direction:row !important; flex-wrap:wrap !important; gap:4px !important; }
@@ -185,6 +224,9 @@ export const CSS = `
     .input { font-size:16px; }
     /* inline grids are 2- or 4-column; collapse them all on small screens */
     [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
+    /* …and never let a grid child grow wider than the screen (a wide row inside it would
+       otherwise push the whole page into horizontal scrolling) */
+    [style*="grid-template-columns"] > * { min-width:0; }
     /* let wide tables scroll horizontally instead of overflowing the panel */
     .tbl { display:block; overflow-x:auto; white-space:nowrap; }
   }

@@ -31,6 +31,7 @@ import {
   STATS_PERIODS,
   ChartCard,
   barLabel,
+  legendText,
 } from "../ui/charts.jsx";
 import { useState, useMemo } from "react";
 import { money, todayStr } from "../lib/format.js";
@@ -135,7 +136,7 @@ export function Heatmap({ data }) {
                 height: "auto",
                 textAlign: "center",
                 fontSize: 9.5,
-                color: "#8A9C90",
+                color: "#5C6E63",
                 fontWeight: 600,
               }}
             >
@@ -173,7 +174,7 @@ export function Heatmap({ data }) {
             marginTop: 8,
             marginLeft: 38,
             fontSize: 10.5,
-            color: "#8A9C90",
+            color: "#5C6E63",
           }}
         >
           <span>Quieter</span>
@@ -310,6 +311,7 @@ export function Stats({ sales, expenses, items }) {
         <select
           className="input"
           style={{ width: "auto" }}
+          aria-label="Period"
           value={preset}
           onChange={(e) => setPreset(e.target.value)}
         >
@@ -323,7 +325,7 @@ export function Stats({ sales, expenses, items }) {
 
       {preset === "custom" && (
         <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-          <label style={{ fontSize: 12, color: "#6B7E74" }}>
+          <label style={{ fontSize: 12, color: "#556A5F" }}>
             From{" "}
             <input
               type="date"
@@ -334,7 +336,7 @@ export function Stats({ sales, expenses, items }) {
               onChange={(e) => setCfrom(e.target.value)}
             />
           </label>
-          <label style={{ fontSize: 12, color: "#6B7E74" }}>
+          <label style={{ fontSize: 12, color: "#556A5F" }}>
             To{" "}
             <input
               type="date"
@@ -371,7 +373,13 @@ export function Stats({ sales, expenses, items }) {
 
       {pSales.length === 0 ? (
         <section style={{ ...S.panel, marginTop: 16 }}>
-          <Empty text="No sales in this period — pick a wider range to see the charts." />
+          <Empty text="No sales in this period — pick a wider range to see the charts.">
+            {preset !== "allTime" && (
+              <button className="btn primary" onClick={() => setPreset("allTime")}>
+                Show all time
+              </button>
+            )}
+          </Empty>
         </section>
       ) : (
         <>
@@ -469,12 +477,12 @@ export function Stats({ sales, expenses, items }) {
               />
               <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrCompact} width={48} />
               <Tooltip formatter={(v, n) => [formatINR(v), n]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
               <Line
                 type="monotone"
                 dataKey="revenue"
                 name="Daily revenue"
-                stroke="#9BC0AC"
+                stroke="#4A7A63"
                 strokeWidth={1.5}
                 dot={false}
                 label={exactLabel}
@@ -501,7 +509,7 @@ export function Stats({ sales, expenses, items }) {
                   width={48}
                 />
                 <Tooltip formatter={(v, n) => [formatINR(v), n]} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
                 <Bar
                   dataKey="revenue"
                   name="Revenue"
@@ -552,7 +560,7 @@ export function Stats({ sales, expenses, items }) {
                   alignItems: "center",
                   gap: 6,
                   fontSize: 11.5,
-                  color: "#6B7E74",
+                  color: "#556A5F",
                   marginBottom: 8,
                   cursor: "pointer",
                 }}
@@ -622,7 +630,7 @@ export function Stats({ sales, expenses, items }) {
                           stroke="none"
                         >
                           {pay.rows.map((r) => (
-                            <Cell key={r.name} fill={PAY_COLORS[r.name] || "#8A9C90"} />
+                            <Cell key={r.name} fill={PAY_COLORS[r.name] || "#5C6E63"} />
                           ))}
                         </Pie>
                         <Tooltip formatter={(v, n) => [formatINR(v), n]} />
@@ -639,7 +647,7 @@ export function Stats({ sales, expenses, items }) {
                       }}
                     >
                       <div style={{ textAlign: "center" }}>
-                        <div style={{ fontSize: 11, color: "#8A9C90" }}>Total</div>
+                        <div style={{ fontSize: 11, color: "#5C6E63" }}>Total</div>
                         <div style={{ fontSize: 15, fontWeight: 800, color: "#10331F" }}>
                           {inrCompact(pay.total)}
                         </div>
@@ -655,14 +663,14 @@ export function Stats({ sales, expenses, items }) {
                               width: 10,
                               height: 10,
                               borderRadius: 3,
-                              background: PAY_COLORS[r.name] || "#8A9C90",
+                              background: PAY_COLORS[r.name] || "#5C6E63",
                             }}
                           />
                           {r.name}
                         </span>
                         <b>
                           {formatINR(r.value)}{" "}
-                          <span style={{ color: "#8A9C90", fontWeight: 500 }}>· {r.pct}%</span>
+                          <span style={{ color: "#5C6E63", fontWeight: 500 }}>· {r.pct}%</span>
                         </b>
                       </div>
                     ))}
@@ -699,7 +707,7 @@ export function Stats({ sales, expenses, items }) {
                   type="monotone"
                   dataKey="outstanding"
                   name="Outstanding"
-                  stroke="#B0762A"
+                  stroke="#8A5A12"
                   strokeWidth={2}
                   fill="url(#gUdhari)"
                 />
@@ -760,7 +768,7 @@ export function Stats({ sales, expenses, items }) {
               )}
             </ChartCard>
           </div>
-          <div style={{ fontSize: 12, color: "#6B7E74", marginTop: 8 }}>
+          <div style={{ fontSize: 12, color: "#556A5F", marginTop: 8 }}>
             <b>Capital / Setup Cost</b> (one-time): {formatINR(be.capex)} — this is investment,
             never subtracted from trading profit.
             {est.status === "reached" && <> You’ve recovered it (took {est.days} day(s)).</>}
@@ -775,7 +783,7 @@ export function Stats({ sales, expenses, items }) {
           <div style={sectionHead}>
             Capital / setup spending
             {preset === "allTime" && (
-              <span style={{ fontWeight: 500, color: "#8A9C90" }}>
+              <span style={{ fontWeight: 500, color: "#5C6E63" }}>
                 {" "}
                 · since{" "}
                 {new Date(CAPEX_START + "T00:00").toLocaleDateString("en-IN", {
@@ -845,7 +853,7 @@ export function Stats({ sales, expenses, items }) {
                         <Bar
                           dataKey="value"
                           name="Spent"
-                          fill="#B0762A"
+                          fill="#8A5A12"
                           radius={[0, 3, 3, 0]}
                           label={compactLabelRight}
                         />
@@ -902,7 +910,7 @@ export function Stats({ sales, expenses, items }) {
                     fontWeight: 500,
                     textTransform: "none",
                     letterSpacing: 0,
-                    color: "#8A9C90",
+                    color: "#5C6E63",
                     marginLeft: 8,
                   }}
                 >
@@ -917,7 +925,7 @@ export function Stats({ sales, expenses, items }) {
                     <div key={i.name} style={S.row}>
                       <span>
                         {i.name}{" "}
-                        <span style={{ color: "#9AA", fontSize: 11 }}>
+                        <span style={{ color: "#5F6B6B", fontSize: 11 }}>
                           · {i.stock} pcs{i.subcategory ? " · " + i.subcategory : ""}
                         </span>
                       </span>
@@ -925,7 +933,7 @@ export function Stats({ sales, expenses, items }) {
                     </div>
                   ))}
                   {dead.length > 10 && (
-                    <div style={{ fontSize: 11.5, color: "#8A9C90", marginTop: 6 }}>
+                    <div style={{ fontSize: 11.5, color: "#5C6E63", marginTop: 6 }}>
                       + {dead.length - 10} more…
                     </div>
                   )}

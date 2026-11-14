@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { todayStr, money, uid, INR } from "../lib/format.js";
-import { Header, Field, Empty } from "../ui/index.jsx";
+import { Header, Field, Empty, focusFirstField } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 
 // ---------- Add Expense (own page) ----------
@@ -33,11 +33,20 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
   };
 
   const del = (e) => {
-    if (!confirm(`Delete expense “${e.desc}” (${INR(e.amount)})?`)) return;
+    // Reversible → no "are you sure?"; a 5-second Undo instead.
     setExpenses((list) => list.filter((x) => x.id !== e.id));
     if (editing?.id === e.id) setEditing(null);
     log("expense", `Deleted expense ${INR(e.amount)} — ${e.desc}`);
-    notify("Expense deleted");
+    notify("Expense deleted", {
+      action: {
+        label: "Undo",
+        run: () => {
+          setExpenses((list) => (list.some((x) => x.id === e.id) ? list : [...list, e]));
+          log("expense", `Restored expense ${INR(e.amount)} — ${e.desc}`);
+          notify("Expense restored");
+        },
+      },
+    });
   };
 
   const startEdit = (e) =>
@@ -62,7 +71,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
         sub="Record shop expenses — rent, electricity, supplies, salaries…"
       >
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 12, color: showAll ? "#9AA" : "#6B7E74" }}>
+          <label style={{ fontSize: 12, color: showAll ? "#5F6B6B" : "#556A5F" }}>
             Month{" "}
             <input
               type="month"
@@ -100,6 +109,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={exp.amount}
@@ -133,7 +143,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                 fontWeight: 500,
                 textTransform: "none",
                 letterSpacing: 0,
-                color: "#8A9C90",
+                color: "#5C6E63",
                 marginLeft: 8,
               }}
             >
@@ -148,7 +158,11 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                   ? "No expenses recorded yet."
                   : "No expenses recorded in " + monthLabel + "."
               }
-            />
+            >
+              <button className="btn primary" onClick={focusFirstField}>
+                Add an expense
+              </button>
+            </Empty>
           ) : (
             <table className="tbl">
               <thead>
@@ -186,6 +200,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                           className="input"
                           style={{ padding: "6px 8px", textAlign: "right" }}
                           type="number"
+                          inputMode="decimal"
                           min="0"
                           step="0.01"
                           value={editing.amount}
@@ -207,7 +222,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                     </tr>
                   ) : (
                     <tr key={e.id}>
-                      <td style={{ color: "#677", whiteSpace: "nowrap" }}>{e.date}</td>
+                      <td style={{ color: "#566", whiteSpace: "nowrap" }}>{e.date}</td>
                       <td>{e.desc}</td>
                       <td style={{ textAlign: "right", fontWeight: 700 }}>{INR(e.amount)}</td>
                       <td style={{ whiteSpace: "nowrap" }}>

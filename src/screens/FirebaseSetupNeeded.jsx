@@ -49,7 +49,7 @@ export function FirebaseSetupNeeded() {
             Deploy the security rules: <code>firebase deploy --only database,storage</code>.
           </li>
         </ol>
-        <p style={{ color: "#889", fontSize: 12.5, marginTop: 10 }}>
+        <p style={{ color: "#5E5E72", fontSize: 12.5, marginTop: 10 }}>
           See the README (“Firebase setup”) for the full walkthrough.
         </p>
       </div>

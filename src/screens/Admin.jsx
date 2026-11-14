@@ -229,7 +229,7 @@ export function Admin({ items, setSales, setExpenses, setLogs, user, notify, log
               fontWeight: 700,
               textTransform: "uppercase",
               letterSpacing: ".06em",
-              color: grp === "Danger zone" ? "#B23B2E" : "#6B7E74",
+              color: grp === "Danger zone" ? "#B23B2E" : "#556A5F",
               marginBottom: 6,
             }}
           >
@@ -317,6 +317,7 @@ export function Admin({ items, setSales, setExpenses, setLogs, user, notify, log
                 className="input"
                 type="password"
                 autoFocus
+                aria-label="Account password"
                 placeholder="Account password"
                 value={pwd}
                 onChange={(e) => setPwd(e.target.value)}

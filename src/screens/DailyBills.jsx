@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { confirmDialog } from "../ui/dialogs.jsx";
 import {
   blankDailyBill,
   validateDailyBill,
@@ -13,9 +14,9 @@ import {
   dailyOutstanding,
 } from "../lib/dailyBills.js";
 import { todayStr, uid, INR, money, dateStr } from "../lib/format.js";
-import { Header, Field, Card, Empty } from "../ui/index.jsx";
+import { Header, Field, Card, Empty, focusFirstField } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
-import { ChartCard, inrTick } from "../ui/charts.jsx";
+import { ChartCard, inrTick, legendText } from "../ui/charts.jsx";
 import {
   BarChart,
   CartesianGrid,
@@ -38,9 +39,9 @@ export const METHOD_COLORS = {
   UPI: "#2A6FB0",
   "Bank Transfer": "#7A5AB0",
   Credit: "#C44536",
-  Cheque: "#B0762A",
+  Cheque: "#8A5A12",
 };
-export const DAILY_STATUS_COLORS = { Paid: "#1B5E43", Pending: "#C44536", Partial: "#B0762A" };
+export const DAILY_STATUS_COLORS = { Paid: "#1B5E43", Pending: "#C44536", Partial: "#8A5A12" };
 
 export function DailyBills({
   dailyBills,
@@ -116,11 +117,13 @@ export function DailyBills({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const del = (d) => {
+  const del = async (d) => {
     if (
-      !confirm(
-        `Delete daily-need bill from “${d.vendorName}” (${INR(d.billAmount)})? It will also be removed from Vendor Bills.`
-      )
+      !(await confirmDialog({
+        title: "Delete supplier bill",
+        message: `Delete daily-need bill from “${d.vendorName}” (${INR(d.billAmount)})? It will also be removed from Vendor Bills.`,
+        danger: true,
+      }))
     )
       return;
     setDailyBills((list) => list.filter((x) => x.id !== d.id));
@@ -277,7 +280,7 @@ export function DailyBills({
         title="Supplier Bills"
         sub="Track day-to-day supplier purchase bills (stock, packaging, tailoring) — auto-synced into Vendor Bills"
       >
-        <span style={{ fontSize: 11.5, color: "#0E7C86" }}>
+        <span style={{ fontSize: 11.5, color: "#0B6770" }}>
           🧺 Each entry also appears in Vendor Bills
         </span>
       </Header>
@@ -319,6 +322,7 @@ export function DailyBills({
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="any"
                 value={form.qty}
@@ -330,6 +334,7 @@ export function DailyBills({
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={form.unitPrice}
@@ -342,7 +347,7 @@ export function DailyBills({
             <div
               style={{
                 fontSize: 12,
-                color: "#0E7C86",
+                color: "#0B6770",
                 background: "#EAF7F8",
                 border: "1px solid #C5E7EA",
                 borderRadius: 8,
@@ -383,6 +388,7 @@ export function DailyBills({
               <input
                 className="input"
                 type="number"
+                inputMode="decimal"
                 min="0"
                 step="0.01"
                 value={autoTotal > 0 ? autoTotal : form.billAmount}
@@ -427,6 +433,7 @@ export function DailyBills({
                 <input
                   className="input"
                   type="number"
+                  inputMode="decimal"
                   min="0"
                   step="0.01"
                   value={form.paidAmount}
@@ -493,7 +500,7 @@ export function DailyBills({
               marginBottom: 12,
             }}
           >
-            <label style={{ fontSize: 12, color: "#6B7E74" }}>
+            <label style={{ fontSize: 12, color: "#556A5F" }}>
               From{" "}
               <input
                 type="date"
@@ -504,7 +511,7 @@ export function DailyBills({
                 onChange={(e) => setFrom(e.target.value)}
               />
             </label>
-            <label style={{ fontSize: 12, color: "#6B7E74" }}>
+            <label style={{ fontSize: 12, color: "#556A5F" }}>
               To{" "}
               <input
                 type="date"
@@ -515,7 +522,7 @@ export function DailyBills({
                 onChange={(e) => setTo(e.target.value)}
               />
             </label>
-            <label style={{ fontSize: 12, color: "#6B7E74" }}>
+            <label style={{ fontSize: 12, color: "#556A5F" }}>
               Month{" "}
               <input
                 type="month"
@@ -528,6 +535,7 @@ export function DailyBills({
             <select
               className="input"
               style={{ width: "auto" }}
+              aria-label="Filter by payment method"
               value={methodF}
               onChange={(e) => setMethodF(e.target.value)}
             >
@@ -539,6 +547,7 @@ export function DailyBills({
             <select
               className="input"
               style={{ width: "auto" }}
+              aria-label="Filter by status"
               value={statusF}
               onChange={(e) => setStatusF(e.target.value)}
             >
@@ -550,6 +559,7 @@ export function DailyBills({
             <input
               className="input"
               style={{ flex: 1, minWidth: 120 }}
+              aria-label="Search vendor"
               placeholder="Search vendor…"
               value={vq}
               onChange={(e) => setVq(e.target.value)}
@@ -587,7 +597,11 @@ export function DailyBills({
                   ? "No daily-need bills yet. Add your first one on the left."
                   : "No bills match these filters."
               }
-            />
+            >
+              <button className="btn primary" onClick={focusFirstField}>
+                Add a supplier bill
+              </button>
+            </Empty>
           ) : (
             <table className="tbl" style={{ marginTop: 12 }}>
               <thead>
@@ -607,17 +621,17 @@ export function DailyBills({
                   const out = dailyOutstanding(d);
                   return (
                     <tr key={d.id}>
-                      <td style={{ whiteSpace: "nowrap", color: "#677" }}>{fmtDate(d.date)}</td>
-                      <td style={{ color: "#677", fontSize: 12.5 }}>{d.category || "—"}</td>
+                      <td style={{ whiteSpace: "nowrap", color: "#566" }}>{fmtDate(d.date)}</td>
+                      <td style={{ color: "#566", fontSize: 12.5 }}>{d.category || "—"}</td>
                       <td>
                         {d.itemName ? (
                           <>
                             {d.itemName}
                             {d.qty ? (
-                              <span style={{ color: "#9AA", fontWeight: 600 }}> ×{d.qty}</span>
+                              <span style={{ color: "#5F6B6B", fontWeight: 600 }}> ×{d.qty}</span>
                             ) : null}
                             {d.unitPrice ? (
-                              <span style={{ color: "#9AA", fontWeight: 500 }}>
+                              <span style={{ color: "#5F6B6B", fontWeight: 500 }}>
                                 {" "}
                                 @{INR(d.unitPrice)}
                               </span>
@@ -630,14 +644,14 @@ export function DailyBills({
                       <td style={{ fontWeight: 600 }}>
                         {d.vendorName}
                         {d.billNumber ? (
-                          <span style={{ color: "#9AA", fontWeight: 500, fontSize: 11.5 }}>
+                          <span style={{ color: "#5F6B6B", fontWeight: 500, fontSize: 11.5 }}>
                             {" "}
                             · {d.billNumber}
                           </span>
                         ) : null}
                       </td>
                       <td style={{ textAlign: "right", fontWeight: 700 }}>{INR(d.billAmount)}</td>
-                      <td style={{ color: "#677", fontSize: 12.5, whiteSpace: "nowrap" }}>
+                      <td style={{ color: "#566", fontSize: 12.5, whiteSpace: "nowrap" }}>
                         {d.paymentMethod || "—"}
                       </td>
                       <td style={{ whiteSpace: "nowrap" }}>
@@ -646,7 +660,7 @@ export function DailyBills({
                             fontSize: 10.5,
                             fontWeight: 800,
                             textTransform: "uppercase",
-                            color: DAILY_STATUS_COLORS[d.paymentStatus] || "#789",
+                            color: DAILY_STATUS_COLORS[d.paymentStatus] || "#586878",
                             border: `1px solid ${DAILY_STATUS_COLORS[d.paymentStatus] || "#bbb"}`,
                             borderRadius: 6,
                             padding: "0 6px",
@@ -681,7 +695,7 @@ export function DailyBills({
             </table>
           )}
           {sorted.length > 0 && goVendorBills && (
-            <div style={{ fontSize: 11.5, color: "#8A9C90", marginTop: 10 }}>
+            <div style={{ fontSize: 11.5, color: "#5C6E63", marginTop: 10 }}>
               These bills also appear in{" "}
               <button
                 className="btn small ghost"
@@ -708,7 +722,7 @@ export function DailyBills({
               />
               <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
               <Tooltip formatter={(v) => INR(v)} />
-              <Bar dataKey="amount" name="Spend" fill="#0E7C86" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="amount" name="Spend" fill="#0B6770" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ChartCard>
           <ChartCard title="Top vendors by spend">
@@ -743,11 +757,11 @@ export function DailyBills({
                 stroke="none"
               >
                 {byMethod.map((r) => (
-                  <Cell key={r.name} fill={METHOD_COLORS[r.name] || "#8A9C90"} />
+                  <Cell key={r.name} fill={METHOD_COLORS[r.name] || "#5C6E63"} />
                 ))}
               </Pie>
               <Tooltip formatter={(v, n) => [INR(v), n]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
             </PieChart>
           </ChartCard>
           <ChartCard title="Paid vs Pending vs Partial">
@@ -764,11 +778,11 @@ export function DailyBills({
                 stroke="none"
               >
                 {byStatus.map((r) => (
-                  <Cell key={r.name} fill={DAILY_STATUS_COLORS[r.name] || "#8A9C90"} />
+                  <Cell key={r.name} fill={DAILY_STATUS_COLORS[r.name] || "#5C6E63"} />
                 ))}
               </Pie>
               <Tooltip formatter={(v, n) => [INR(v), n]} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Legend formatter={legendText} wrapperStyle={{ fontSize: 12 }} />
             </PieChart>
           </ChartCard>
         </div>

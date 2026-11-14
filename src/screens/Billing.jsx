@@ -1,5 +1,6 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useRef, useEffect, useMemo } from "react";
+import { useLang } from "../i18n/index.jsx";
 import { useDebouncedValue } from "../ui/hooks.js";
 import { todayStr, money, uid, INR } from "../lib/format.js";
 import { productStock, variantLabel, isProductLow } from "../lib/products.js";
@@ -9,8 +10,29 @@ import { S } from "../ui/styles.js";
 import { CURRENCY } from "../config/currency.js";
 import { printReceipt, preloadReceiptAssets } from "../lib/print.js";
 
+const HELD_KEY = "cfs-held-bills-v1";
+const loadHeldBills = () => {
+  try {
+    const v = JSON.parse(localStorage.getItem(HELD_KEY) || "[]");
+    return Array.isArray(v) ? v.filter((b) => b && Array.isArray(b.cart) && b.cart.length) : [];
+  } catch {
+    return [];
+  }
+};
+const saveHeldBills = (list) => {
+  try {
+    localStorage.setItem(HELD_KEY, JSON.stringify(list));
+  } catch (e) {
+    console.error("held bills write failed", e);
+  }
+};
+const heldTotal = (b) => money((b.cart || []).reduce((a, c) => a + c.sellingPrice * c.qty, 0));
+const heldLabel = (b) =>
+  new Date(b.at || Date.now()).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
+
 // ---------- Billing / POS ----------
-export function Billing({ items, sales, recordSale, online, notify, log }) {
+export function Billing({ items, sales, recordSale, online, notify, log, goInventory }) {
+  const { t } = useLang();
   const config = useShopConfig();
   const [q, setQ] = useState("");
   const [cart, setCart] = useState([]); // [{ key, productId, variantId, name, brand, icon, size, color, sellingPrice, purchasePrice, category, subcategory, qty, misc? }]
@@ -28,6 +50,11 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
   const [miscPrice, setMiscPrice] = useState("");
   const [miscBuy, setMiscBuy] = useState("");
   const [custFocus, setCustFocus] = useState(false);
+  // Held ("parked") bills: a customer steps away mid-bill → hold it, serve the next one,
+  // resume later. Kept on this device (localStorage) so a reload does not lose them. Stock is
+  // not reserved while held; it is re-checked when the bill is completed.
+  const [held, setHeld] = useState(() => loadHeldBills());
+  useEffect(() => saveHeldBills(held), [held]);
   const searchRef = useRef(null);
   useEffect(() => searchRef.current?.focus(), []);
   // Have the receipt's logo and payment QR ready before the first bill is printed.
@@ -121,17 +148,26 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
 
   const openProduct = (product) => {
     const vs = product.variants || [];
-    if (stockOf(product) <= 0) return notify("Out of stock: " + product.name);
+    if (stockOf(product) <= 0) return notify(t("Out of stock: {name}", { name: product.name }));
     if (vs.length === 1) return addVariant(product, vs[0]);
     setPicker(product);
   };
 
   const addVariant = (product, variant) => {
     if ((Number(variant.stockQty) || 0) <= 0)
-      return notify(`${product.name} — ${variantLabel(variant)} is out of stock`);
+      return notify(
+        t("{name} — {variant} is out of stock", {
+          name: product.name,
+          variant: variantLabel(variant),
+        })
+      );
     if (variantAvail(product, variant) <= 0)
       return notify(
-        `Only ${variant.stockQty} of ${product.name} (${variantLabel(variant)}) in stock`
+        t("Only {n} of {name} ({variant}) in stock", {
+          n: variant.stockQty,
+          name: product.name,
+          variant: variantLabel(variant),
+        })
       );
     const key = product.id + "|" + variant.id;
     setCart((c) => {
@@ -166,7 +202,7 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
       const v = p?.variants?.find((x) => x.id === line.variantId);
       const stock = Number(v?.stockQty) || 0;
       if (q2 > stock) {
-        notify(`Only ${stock} in stock`);
+        notify(t("Only {n} in stock", { n: stock }));
         q2 = stock;
       }
     }
@@ -179,11 +215,11 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
 
   const addMisc = () => {
     const price = +miscPrice;
-    if (!(price > 0)) return notify("Enter a price for the misc item.");
+    if (!(price > 0)) return notify(t("Enter a price for the misc item."));
     const buy = +miscBuy;
     if (miscBuy.trim() !== "" && !(buy >= 0))
-      return notify("Enter a valid buy price (or leave it blank).");
-    const name = miscName.trim() || "Misc item";
+      return notify(t("Enter a valid buy price (or leave it blank)."));
+    const name = miscName.trim() || t("Misc item");
     setCart((c) => [
       ...c,
       {
@@ -203,7 +239,7 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
     setMiscName("");
     setMiscPrice("");
     setMiscBuy("");
-    notify(`Added “${name}” · ${INR(money(price))}`);
+    notify(t("Added “{name}” · {amount}", { name, amount: INR(money(price)) }));
   };
 
   const onSearchKey = (e) => {
@@ -228,6 +264,74 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
   const total = money(subtotal - discountAmt);
   const profit = money(grossProfit - discountAmt);
 
+  const currentBill = () => ({
+    id: uid(),
+    at: Date.now(),
+    cart,
+    saleDate,
+    pay,
+    customer,
+    mobile,
+    paidNow,
+    paidMode,
+    discount,
+    discMode,
+  });
+  const loadBill = (b) => {
+    setCart(b.cart || []);
+    setSaleDate(b.saleDate && b.saleDate <= todayStr() ? b.saleDate : todayStr());
+    setPay(b.pay || "UPI");
+    setCustomer(b.customer || "");
+    setMobile(b.mobile || "");
+    setPaidNow(b.paidNow || "");
+    setPaidMode(b.paidMode || "Cash");
+    setDiscount(b.discount || "");
+    setDiscMode(b.discMode || "flat");
+  };
+  const clearBill = () => {
+    setCart([]);
+    setQ("");
+    setCustomer("");
+    setMobile("");
+    setPaidNow("");
+    setPaidMode("Cash");
+    setDiscount("");
+  };
+  const holdBill = () => {
+    if (cart.length === 0) return;
+    setHeld((h) => [...h, currentBill()]);
+    clearBill();
+    searchRef.current?.focus();
+    notify(t("Bill held — tap it under “Held bills” to resume"));
+  };
+  const resumeBill = (b) => {
+    // Resuming while another bill is open swaps them: the open one is held, nothing is lost.
+    const swap = cart.length > 0 ? currentBill() : null;
+    setHeld((h) => [...h.filter((x) => x.id !== b.id), ...(swap ? [swap] : [])]);
+    loadBill(b);
+    notify(swap ? t("Resumed — the bill you were on is now held") : t("Bill resumed"));
+  };
+  const dropHeld = (b) => {
+    setHeld((h) => h.filter((x) => x.id !== b.id));
+    notify(t("Held bill discarded"), {
+      action: { label: t("Undo"), run: () => setHeld((h) => [...h, b]) },
+    });
+  };
+
+  // Quick-pick: the products sold most recently / most often (from the loaded bills), one tap
+  // to add. Shown only while the search box is empty.
+  const quickPicks = useMemo(() => {
+    return items
+      .filter((i) => soldQty[i.name] && productStock(i) > 0)
+      .sort((a, b) => {
+        const la = lastSold[a.name] || "",
+          lb = lastSold[b.name] || "";
+        if (la !== lb) return la < lb ? 1 : -1;
+        return (soldQty[b.name] || 0) - (soldQty[a.name] || 0);
+      })
+      .slice(0, 8);
+  }, [items, soldQty, lastSold]);
+
   const completeSale = () => {
     if (cart.length === 0 || soldCart.current === cart) return;
     // Re-check against the freshest variant stock (another device may have sold since).
@@ -241,7 +345,13 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
       .filter(({ c, stock }) => c.qty > stock);
     if (short.length) {
       const { c, stock } = short[0];
-      return notify(`Only ${stock} of ${c.name} (${variantLabel(c)}) left — adjust the bill.`);
+      return notify(
+        t("Only {n} of {name} ({variant}) left — adjust the bill.", {
+          n: stock,
+          name: c.name,
+          variant: variantLabel(c),
+        })
+      );
     }
     const now = new Date();
     const backDated = saleDate !== todayStr();
@@ -294,32 +404,29 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
         (customer.trim() ? ` (${customer.trim()})` : "") +
         (backDated ? ` · back-dated to ${saleDate}` : "")
     );
-    setCart([]);
-    setQ("");
-    setCustomer("");
-    setMobile("");
-    setPaidNow("");
-    setPaidMode("Cash");
-    setDiscount("");
+    clearBill();
     searchRef.current?.focus();
     notify(
       online
-        ? `Bill saved (${pay}) — ` + INR(total)
-        : `Saved on this device (${pay}) — ${INR(total)} · will sync when online`
+        ? t("Bill saved ({pay}) — {amount}", { pay, amount: INR(total) })
+        : t("Saved on this device ({pay}) — {amount} · will sync when online", {
+            pay,
+            amount: INR(total),
+          })
     );
   };
 
   return (
     <div>
-      <Header title="Billing" sub="Tap a product, pick size &amp; colour, add to the bill">
+      <Header title="Billing" sub="Tap a product, pick size & colour, add to the bill">
         <label
           style={{
             fontSize: 12,
-            color: saleDate === todayStr() ? "#6B7E74" : "#C44536",
+            color: saleDate === todayStr() ? "#556A5F" : "#C44536",
             fontWeight: 600,
           }}
         >
-          Bill date{" "}
+          {t("Bill date")}{" "}
           <input
             type="date"
             className="input"
@@ -340,7 +447,8 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
           <input
             ref={searchRef}
             className="input"
-            placeholder="Search name / brand / code… (Enter opens top match)"
+            aria-label="Search name / brand / code"
+            placeholder={t("Search name / brand / code… (Enter opens top match)")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
             onKeyDown={onSearchKey}
@@ -361,12 +469,13 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
             <span
               style={{ fontSize: 11.5, fontWeight: 700, color: "#8E2C48", whiteSpace: "nowrap" }}
             >
-              🧾 Misc
+              🧾 {t("Misc")}
             </span>
             <input
               className="input"
               style={{ flex: 1, minWidth: 0 }}
-              placeholder="Name (optional)"
+              aria-label="Name (optional)"
+              placeholder={t("Name (optional)")}
               value={miscName}
               onChange={(e) => setMiscName(e.target.value)}
               onKeyDown={(e) => {
@@ -378,9 +487,11 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
               className="input"
               style={{ width: 78 }}
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
-              placeholder="buy"
+              aria-label="buy"
+              placeholder={t("buy")}
               value={miscBuy}
               onChange={(e) => setMiscBuy(e.target.value)}
               onKeyDown={(e) => {
@@ -393,9 +504,11 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
               className="input"
               style={{ width: 86 }}
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
-              placeholder="sell"
+              aria-label="sell"
+              placeholder={t("sell")}
               value={miscPrice}
               onChange={(e) => setMiscPrice(e.target.value)}
               onKeyDown={(e) => {
@@ -404,15 +517,40 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
               aria-label="Misc sell price"
             />
             <button className="btn" onClick={addMisc}>
-              + Add
+              {t("+ Add")}
             </button>
           </div>
+          {!q.trim() && quickPicks.length > 0 && (
+            <div className="quick-row" aria-label="Recent and best sellers">
+              {quickPicks.map((i) => (
+                <button key={i.id} className="quick" onClick={() => openProduct(i)}>
+                  <span style={{ color: "#8A5A00" }}>★</span> {i.name}
+                  <span style={{ color: "#6A5560", fontWeight: 600 }}>
+                    {" "}
+                    · {INR(i.sellingPrice)}
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <div
             className="pick-grid"
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
           >
             {results.length === 0 && (
-              <Empty text={q ? "No products match." : "No products yet — add some in Inventory."} />
+              <Empty text={q ? "No products match." : "No products yet — add some in Inventory."}>
+                {q ? (
+                  <button className="btn" onClick={() => setQ("")}>
+                    {t("Clear search")}
+                  </button>
+                ) : (
+                  goInventory && (
+                    <button className="btn primary" onClick={goInventory}>
+                      {t("Open Inventory")}
+                    </button>
+                  )
+                )}
+              </Empty>
             )}
             {results.map((i) => {
               const st = stockOf(i);
@@ -434,14 +572,14 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                     {i.name}
                     {soldQty[i.name] ? (
                       <span
-                        style={{ color: "#E8A33D", fontSize: 11, marginLeft: 4 }}
+                        style={{ color: "#8A5A00", fontSize: 11, marginLeft: 4 }}
                         title="best-seller"
                       >
                         ★
                       </span>
                     ) : null}
                   </div>
-                  <div style={{ fontSize: 11, color: "#9AA", marginTop: 1 }}>
+                  <div style={{ fontSize: 11, color: "#5F6B6B", marginTop: 1 }}>
                     {[i.brand, i.subcategory].filter(Boolean).join(" · ")}
                   </div>
                   <div
@@ -455,11 +593,11 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                     <span style={{ color: "#8E2C48", fontWeight: 800 }}>{INR(i.sellingPrice)}</span>
                     <span
                       style={{
-                        color: !inStock || low ? "#C44536" : "#789",
+                        color: !inStock || low ? "#C44536" : "#586878",
                         fontWeight: !inStock ? 600 : 400,
                       }}
                     >
-                      {!inStock ? "Out of stock" : st + " in stock"}
+                      {!inStock ? t("Out of stock") : t("{n} in stock", { n: st })}
                     </span>
                   </div>
                 </div>
@@ -470,7 +608,40 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
 
         {/* cart / bill */}
         <section style={S.panel}>
-          <div style={S.panelHead}>Current bill</div>
+          <div style={{ ...S.panelHead, display: "flex", alignItems: "center", gap: 8 }}>
+            {t("Current bill")}
+            <button
+              className="btn tap"
+              style={{ marginLeft: "auto" }}
+              disabled={cart.length === 0}
+              onClick={holdBill}
+            >
+              {t("⏸ Hold")}
+            </button>
+          </div>
+          {held.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 11.5, fontWeight: 700, color: "#6A5560", marginBottom: 4 }}>
+                {t("Held bills ({n})", { n: held.length })}
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {held.map((b) => (
+                  <span key={b.id} className="held">
+                    <button className="held-main" onClick={() => resumeBill(b)}>
+                      ▶ {b.customer?.trim() || heldLabel(b)} · {INR(heldTotal(b))}
+                    </button>
+                    <button
+                      className="held-x"
+                      aria-label={"Discard held bill " + (b.customer?.trim() || heldLabel(b))}
+                      onClick={() => dropHeld(b)}
+                    >
+                      ✕
+                    </button>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           {cart.length === 0 ? (
             <Empty text="No items yet. Tap a product to begin." />
           ) : (
@@ -498,26 +669,43 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                     >
                       {c.icon} {c.name}
                     </div>
-                    <div style={{ fontSize: 11, color: "#9AA" }}>
+                    <div style={{ fontSize: 11, color: "#5F6B6B" }}>
                       {[variantLabel(c) !== "—" ? variantLabel(c) : "", INR(c.sellingPrice)]
                         .filter(Boolean)
                         .join(" · ")}
                     </div>
                   </div>
-                  <input
-                    className="input"
-                    style={{ width: 56, padding: "5px 6px" }}
-                    type="number"
-                    min="0"
-                    value={c.qty}
-                    onChange={(e) => setQty(c.key, Math.floor(+e.target.value || 0))}
-                    aria-label={"Quantity for " + c.name}
-                  />
+                  <div className="stepper">
+                    <button
+                      className="step"
+                      aria-label={"One less " + c.name}
+                      onClick={() => setQty(c.key, c.qty - 1)}
+                    >
+                      −
+                    </button>
+                    <input
+                      className="input"
+                      style={{ width: 48, padding: "5px 4px", textAlign: "center" }}
+                      type="number"
+                      inputMode="numeric"
+                      min="0"
+                      value={c.qty}
+                      onChange={(e) => setQty(c.key, Math.floor(+e.target.value || 0))}
+                      aria-label={"Quantity for " + c.name}
+                    />
+                    <button
+                      className="step"
+                      aria-label={"One more " + c.name}
+                      onClick={() => setQty(c.key, c.qty + 1)}
+                    >
+                      +
+                    </button>
+                  </div>
                   <div style={{ width: 68, textAlign: "right", fontWeight: 700, fontSize: 13 }}>
                     {INR(c.sellingPrice * c.qty)}
                   </div>
                   <button
-                    className="btn ghost small"
+                    className="btn ghost tap"
                     aria-label={"Remove " + c.name}
                     onClick={() => setQty(c.key, 0)}
                   >
@@ -530,13 +718,15 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
 
           {/* discount */}
           <div style={{ display: "flex", gap: 6, alignItems: "center", margin: "8px 0" }}>
-            <span style={{ fontSize: 12, color: "#465", fontWeight: 600 }}>Discount</span>
+            <span style={{ fontSize: 12, color: "#465", fontWeight: 600 }}>{t("Discount")}</span>
             <input
               className="input"
               style={{ width: 80, padding: "6px 8px" }}
               type="number"
+              inputMode="decimal"
               min="0"
               step="0.01"
+              aria-label="0"
               placeholder="0"
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
@@ -578,10 +768,10 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                   display: "flex",
                   justifyContent: "space-between",
                   fontSize: 13,
-                  color: "#789",
+                  color: "#586878",
                 }}
               >
-                <span>Subtotal</span>
+                <span>{t("Subtotal")}</span>
                 <span>{INR(subtotal)}</span>
               </div>
             )}
@@ -594,7 +784,7 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                 margin: "4px 0",
               }}
             >
-              <span>Total</span>
+              <span>{t("Total")}</span>
               <span>{INR(total)}</span>
             </div>
           </div>
@@ -607,7 +797,7 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                 className={"seg wide" + (pay === p ? " on" : "")}
                 onClick={() => setPay(p)}
               >
-                {p}
+                {t(p)}
               </button>
             ))}
           </div>
@@ -618,8 +808,8 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
               className="input"
               placeholder={
                 pay === "Udhari"
-                  ? "Customer name (for the credit book)"
-                  : "Customer name (optional)"
+                  ? t("Customer name (for the credit book)")
+                  : t("Customer name (optional)")
               }
               value={customer}
               onChange={(e) => setCustomer(e.target.value)}
@@ -651,7 +841,7 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                     }}
                   >
                     {c.name}
-                    {c.mobile ? <span style={{ color: "#9AA" }}> · {c.mobile}</span> : ""}
+                    {c.mobile ? <span style={{ color: "#5F6B6B" }}> · {c.mobile}</span> : ""}
                   </div>
                 ))}
               </div>
@@ -660,7 +850,8 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
           <input
             className="input"
             style={{ marginBottom: 8 }}
-            placeholder="Mobile (optional)"
+            aria-label="Mobile (optional)"
+            placeholder={t("Mobile (optional)")}
             value={mobile}
             onChange={(e) => setMobile(e.target.value)}
             aria-label="Customer mobile"
@@ -672,8 +863,10 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                 className="input"
                 style={{ flex: 1 }}
                 type="number"
+                inputMode="decimal"
                 min="0"
-                placeholder="Paid now (optional)"
+                aria-label="Paid now (optional)"
+                placeholder={t("Paid now (optional)")}
                 value={paidNow}
                 onChange={(e) => setPaidNow(e.target.value)}
                 aria-label="Amount paid now"
@@ -692,28 +885,39 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                     className={"seg" + (paidMode === m ? " on" : "")}
                     onClick={() => setPaidMode(m)}
                   >
-                    {m}
+                    {t(m)}
                   </button>
                 ))}
               </div>
             </div>
           )}
 
-          <button
-            className="btn primary big"
-            style={{ width: "100%" }}
-            disabled={cart.length === 0 || saving}
-            onClick={completeSale}
-          >
-            Complete sale · {INR(total)}
-          </button>
+          {/* On a phone this bar is pinned to the bottom of the screen (see .bill-bar in CSS), so
+              the total and the Complete button are always reachable without scrolling. */}
+          <div className="bill-bar">
+            <div className="bill-bar-total">
+              <span style={{ fontSize: 11.5, color: "#556A5F" }}>
+                {t("{n} items", { n: cart.reduce((a, c) => a + c.qty, 0) })} · {t(pay)}
+              </span>
+              <b style={{ fontSize: 19 }}>{INR(total)}</b>
+            </div>
+            <button
+              className="btn primary big"
+              style={{ width: "100%" }}
+              disabled={cart.length === 0 || saving}
+              onClick={completeSale}
+            >
+              {t("Complete sale · {amount}", { amount: INR(total) })}
+            </button>
+          </div>
+          <div className="bill-bar-spacer" />
           {lastSale && (
             <button
               className="btn"
               style={{ width: "100%", marginTop: 8 }}
-              onClick={() => printReceipt(lastSale, config)}
+              onClick={() => printReceipt(lastSale, config, t)}
             >
-              🧾 Print last receipt
+              {t("🧾 Print last receipt")}
             </button>
           )}
         </section>
@@ -721,8 +925,11 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
 
       {/* variant picker modal */}
       {picker && (
-        <Modal title={`${picker.name} — pick size & colour`} onClose={() => setPicker(null)}>
-          <div style={{ fontSize: 12.5, color: "#8A9C90", marginBottom: 10 }}>
+        <Modal
+          title={t("{name} — pick size & colour", { name: picker.name })}
+          onClose={() => setPicker(null)}
+        >
+          <div style={{ fontSize: 12.5, color: "#5C6E63", marginBottom: 10 }}>
             {[picker.brand, picker.subcategory].filter(Boolean).join(" · ")} ·{" "}
             {INR(picker.sellingPrice)}
           </div>
@@ -755,7 +962,7 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
                 >
                   <div style={{ fontWeight: 700, fontSize: 13.5 }}>{variantLabel(v)}</div>
                   <div style={{ fontSize: 11.5, color: can ? "#2E7D5B" : "#C44536", marginTop: 2 }}>
-                    {can ? avail + " available" : "Out of stock"}
+                    {can ? t("{n} available", { n: avail }) : t("Out of stock")}
                   </div>
                 </button>
               );
@@ -763,7 +970,7 @@ export function Billing({ items, sales, recordSale, online, notify, log }) {
           </div>
           <div style={{ marginTop: 12, textAlign: "right" }}>
             <button className="btn primary" onClick={() => setPicker(null)}>
-              Done
+              {t("Done")}
             </button>
           </div>
         </Modal>

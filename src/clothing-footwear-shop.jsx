@@ -1,4 +1,10 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { useLang, LangSelect } from "./i18n/index.jsx";
+import { useDebouncedValue } from "./ui/hooks.js";
+import { syncSummary, syncText } from "./lib/syncStatus.js";
+import { PageSkeleton } from "./ui/index.jsx";
+import { DialogHost, confirmDialog, promptDialog } from "./ui/dialogs.jsx";
+import { useToasts, ToastStack } from "./ui/toasts.jsx";
 import { isFirebaseConfigured, auth } from "./config/firebase.js";
 import { onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
 import { FirebaseSetupNeeded } from "./screens/FirebaseSetupNeeded.jsx";
@@ -90,17 +96,11 @@ export default function App() {
   if (!isFirebaseConfigured) return <FirebaseSetupNeeded />;
   if (user === undefined) {
     return (
-      <div
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          background: "#2A1A22",
-          color: "#E6C9D4",
-          fontFamily: "system-ui, sans-serif",
-        }}
-      >
-        Loading…
+      <div style={{ minHeight: "100vh", background: "#F3F6F3", padding: 24 }}>
+        <style>{CSS}</style>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <PageSkeleton label="Loading…" />
+        </div>
       </div>
     );
   }
@@ -177,6 +177,7 @@ const slugify = (s) =>
 // together and a replay can never apply the stock change twice.
 
 function StoreManager({ user, onLogout }) {
+  const { t } = useLang();
   const [tab, setTab] = useState("dashboard");
   const [otherOpen, setOtherOpen] = useState(false);
   // `rawItems` = products exactly as last received from the cloud (or the local cache).
@@ -199,7 +200,7 @@ function StoreManager({ user, onLogout }) {
     }
   });
   const [loaded, setLoaded] = useState(false);
-  const [toast, setToast] = useState(null);
+  const { toasts, notify, dismiss: dismissToast } = useToasts();
 
   // ---- Shop config (name / address / currency / logo / receipt footer), stored at
   //      shop/shopConfig and cached locally. Every screen reads it via ShopConfigContext. ----
@@ -244,6 +245,14 @@ function StoreManager({ user, onLogout }) {
   const seeded = useRef(false);
   const [online, setOnline] = useState(true);
   const items = useMemo(() => overlayPendingStock(rawItems, pendingOps), [rawItems, pendingOps]);
+  // While online a write is normally acknowledged within a moment — only writes that have
+  // been waiting a few seconds are worth telling the user about (no flicker on every bill).
+  const lingering = useDebouncedValue(pendingOps, 2500);
+  const sync = useMemo(
+    () =>
+      syncSummary(online, online ? lingering.filter((o) => pendingOps.includes(o)) : pendingOps),
+    [online, pendingOps, lingering]
+  );
 
   // Always-current local state, readable from inside async listeners (for the merge) and by
   // the cache writer. `items` here is the RAW cloud view — pending stock is re-overlaid from the
@@ -679,15 +688,6 @@ function StoreManager({ user, onLogout }) {
     };
   }, [rawItems, sales, expenses, logs, bills, dailyBills, loaded]);
 
-  const toastTimer = useRef(null);
-  const notify = (msg) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current); // don't let an old timer cut a new toast short
-    setToast(msg);
-    toastTimer.current = setTimeout(() => {
-      setToast(null);
-      toastTimer.current = null;
-    }, 2200);
-  };
   notifyRef.current = notify; // let the cloud listener surface errors via the same toast
 
   // Persist owner-added subcategories locally; the full list shown everywhere merges these with
@@ -735,8 +735,13 @@ function StoreManager({ user, onLogout }) {
 
   // Prompt for and add a new subcategory. Returns the canonical name to select (existing match if
   // it's a duplicate, the new name otherwise), or null if cancelled/blank. Used by the Add/Edit forms.
-  const addCategory = useCallback(() => {
-    const raw = window.prompt("New subcategory name:");
+  const addCategory = useCallback(async () => {
+    const raw = await promptDialog({
+      title: "New subcategory",
+      label: "Subcategory name",
+      placeholder: "e.g. Lehenga",
+      confirmLabel: "Add",
+    });
     if (raw == null) return null;
     const name = raw.trim();
     if (!name) return null;
@@ -769,12 +774,19 @@ function StoreManager({ user, onLogout }) {
         notify("⚠ Couldn't save settings to cloud (saved on this device).");
       }
     },
-    [config]
+    [config, notify]
   );
 
   const resetMyPassword = async () => {
     if (!user?.email) return;
-    if (!confirm(`Send a password reset link to ${user.email}?`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Reset password",
+        message: `Send a password reset link to ${user.email}?`,
+        confirmLabel: "Send link",
+      }))
+    )
+      return;
     try {
       await sendPasswordResetEmail(auth, user.email);
       notify("Reset link sent to " + user.email);
@@ -840,7 +852,15 @@ function StoreManager({ user, onLogout }) {
       const ext = (f.name.split(".").pop() || "").toLowerCase();
       const d = ext === "xlsx" || ext === "xls" ? await importXlsx(f) : JSON.parse(await f.text());
       if (!d || !Array.isArray(d.items)) throw new Error("bad file");
-      if (!confirm("Restore this backup? It will REPLACE all current data everywhere it syncs."))
+      if (
+        !(await confirmDialog({
+          title: "Restore backup",
+          message:
+            "Restore this backup? It will REPLACE all current data everywhere it syncs. This cannot be undone.",
+          confirmLabel: "Replace everything",
+          danger: true,
+        }))
+      )
         return;
       // Replacing "all current data" needs all current bills loaded, so the ones that are not
       // in the backup are removed too — not just those inside the loaded window.
@@ -911,7 +931,7 @@ function StoreManager({ user, onLogout }) {
               onClick={() => setTab(k)}
             >
               <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>{ic}</span>{" "}
-              {label}
+              {t(label)}
               {k === "inventory" && lowStock.length > 0 && (
                 <span style={S.badge}>{lowStock.length}</span>
               )}
@@ -924,7 +944,8 @@ function StoreManager({ user, onLogout }) {
             onClick={() => setOtherOpen((o) => !o)}
             aria-expanded={showOther}
           >
-            <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>⋯</span> Other
+            <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>⋯</span>{" "}
+            {t("Other")}
             <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.8 }}>
               {showOther ? "▾" : "▸"}
             </span>
@@ -940,7 +961,7 @@ function StoreManager({ user, onLogout }) {
                 <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>
                   {ic}
                 </span>{" "}
-                {label}
+                {t(label)}
                 {k === "alerts" && alertCount > 0 && <span style={S.badge}>{alertCount}</span>}
               </button>
             ))}
@@ -948,13 +969,13 @@ function StoreManager({ user, onLogout }) {
             <div
               style={{
                 fontSize: 10.5,
-                color: "#6E8A7C",
+                color: "#9DB5A8",
                 textTransform: "uppercase",
                 letterSpacing: ".06em",
                 padding: "0 6px 4px",
               }}
             >
-              Backup
+              {t("Backup")}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button
@@ -981,7 +1002,7 @@ function StoreManager({ user, onLogout }) {
                 marginTop: 6,
               }}
             >
-              ⬆ Restore (JSON / XLSX)
+              ⬆ {t("Restore (JSON / XLSX)")}
               <input
                 type="file"
                 accept=".json,.xlsx,.xls,application/json"
@@ -996,17 +1017,17 @@ function StoreManager({ user, onLogout }) {
               style={{ border: "1px solid #2A5A3E", justifyContent: "center" }}
               onClick={resetMyPassword}
             >
-              🔑 Reset
+              🔑 {t("Reset")}
             </button>
             <button
               className="navbtn"
               style={{ border: "1px solid #2A5A3E", justifyContent: "center" }}
               onClick={onLogout}
             >
-              ⎋ Logout
+              ⎋ {t("Logout")}
             </button>
           </div>
-          <div style={{ fontSize: 11, color: "#6E8A7C", padding: "6px 14px 8px" }}>
+          <div style={{ fontSize: 11, color: "#9DB5A8", padding: "6px 14px 8px" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
               <span
                 style={{
@@ -1017,36 +1038,42 @@ function StoreManager({ user, onLogout }) {
                   display: "inline-block",
                 }}
               />
-              {online
-                ? "Online · syncing live"
-                : pendingOps.length
-                  ? `Offline · ${pendingOps.length} change${pendingOps.length === 1 ? "" : "s"} waiting to sync`
-                  : "Offline · saved on this device"}
+              {sync.tone === "error" ? t("Online") : syncText(sync, t)}
             </span>
-            {online && pendingOps.some((o) => o.error) && (
+            {sync.tone === "error" && (
               <button
                 className="navbtn"
                 style={{ border: "1px solid #C9803A", color: "#F2C48D", margin: "2px 0 4px" }}
                 onClick={() => outboxRef.current?.retryNow()}
               >
-                ⚠ {pendingOps.filter((o) => o.error).length} not synced — tap to retry
+                ⚠ {syncText(sync, t)}
               </button>
             )}
             <br />
             {user?.email ? (
               <>
-                Signed in as {user.email}.<br />
+                {t("Signed in as {email}.", { email: user.email })}
+                <br />
               </>
             ) : null}
-            Back up regularly.
+            {t("Back up regularly.")}
+            <LangSelect
+              style={{
+                marginTop: 8,
+                background: "#173F29",
+                color: "#E6F2EA",
+                borderColor: "#2A5A3E",
+                fontSize: 13,
+              }}
+            />
           </div>
         </nav>
 
         {/* main */}
         <main className="main" style={S.main}>
-          <Suspense fallback={<div style={{ padding: 40, color: "#667" }}>Loading…</div>}>
+          <Suspense fallback={<PageSkeleton />}>
             {!loaded ? (
-              <div style={{ padding: 40, color: "#667" }}>Loading store data…</div>
+              <PageSkeleton label={t("Loading store data…")} />
             ) : tab === "dashboard" ? (
               <Dashboard
                 items={items}
@@ -1063,6 +1090,7 @@ function StoreManager({ user, onLogout }) {
                 sales={sales}
                 recordSale={recordSale}
                 online={online}
+                goInventory={() => setTab("inventory")}
                 notify={notify}
                 log={addLog}
               />
@@ -1091,6 +1119,8 @@ function StoreManager({ user, onLogout }) {
                 setSales={setSales}
                 amendSale={amendSale}
                 voidSale={voidSale}
+                goBilling={() => setTab("billing")}
+                recordSale={recordSale}
                 salesFrom={salesFrom}
                 loadOlderSales={loadOlderSales}
                 notify={notify}
@@ -1105,7 +1135,13 @@ function StoreManager({ user, onLogout }) {
                 <Stats sales={sales} expenses={expenses} items={items} />
               </AllSalesGate>
             ) : tab === "udhari" ? (
-              <Udhari sales={sales} setSales={setSales} notify={notify} log={addLog} />
+              <Udhari
+                sales={sales}
+                setSales={setSales}
+                notify={notify}
+                log={addLog}
+                goBilling={() => setTab("billing")}
+              />
             ) : tab === "expense" ? (
               <Expenses
                 expenses={expenses}
@@ -1134,7 +1170,12 @@ function StoreManager({ user, onLogout }) {
                 log={addLog}
               />
             ) : tab === "logs" ? (
-              <Logs logs={logs} setLogs={setLogs} notify={notify} />
+              <Logs
+                logs={logs}
+                setLogs={setLogs}
+                notify={notify}
+                goBilling={() => setTab("billing")}
+              />
             ) : tab === "settings" ? (
               <Settings config={config} onSave={updateConfig} notify={notify} />
             ) : tab === "admin" ? (
@@ -1163,7 +1204,22 @@ function StoreManager({ user, onLogout }) {
           </Suspense>
         </main>
 
-        {toast && <div style={S.toast}>{toast}</div>}
+        {sync.tone !== "ok" && (
+          <button
+            className="sync-pill"
+            style={{
+              background:
+                sync.tone === "error" ? "#7A1C14" : sync.tone === "offline" ? "#8A4B08" : "#1B5E43",
+              color: "#fff",
+            }}
+            onClick={() => outboxRef.current?.retryNow()}
+            aria-label={syncText(sync, t)}
+          >
+            {sync.tone === "error" ? "⚠" : sync.tone === "offline" ? "⛔" : "⟳"} {sync.short}
+          </button>
+        )}
+        <ToastStack toasts={toasts} dismiss={dismissToast} />
+        <DialogHost />
       </div>
     </ShopConfigContext.Provider>
   );
