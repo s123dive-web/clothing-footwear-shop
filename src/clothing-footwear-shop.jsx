@@ -1,4 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { DialogHost, confirmDialog, promptDialog } from "./ui/dialogs.jsx";
+import { useToasts, ToastStack } from "./ui/toasts.jsx";
 import { isFirebaseConfigured, auth } from "./config/firebase.js";
 import { onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
 import { FirebaseSetupNeeded } from "./screens/FirebaseSetupNeeded.jsx";
@@ -199,7 +201,7 @@ function StoreManager({ user, onLogout }) {
     }
   });
   const [loaded, setLoaded] = useState(false);
-  const [toast, setToast] = useState(null);
+  const { toasts, notify, dismiss: dismissToast } = useToasts();
 
   // ---- Shop config (name / address / currency / logo / receipt footer), stored at
   //      shop/shopConfig and cached locally. Every screen reads it via ShopConfigContext. ----
@@ -679,15 +681,6 @@ function StoreManager({ user, onLogout }) {
     };
   }, [rawItems, sales, expenses, logs, bills, dailyBills, loaded]);
 
-  const toastTimer = useRef(null);
-  const notify = (msg) => {
-    if (toastTimer.current) clearTimeout(toastTimer.current); // don't let an old timer cut a new toast short
-    setToast(msg);
-    toastTimer.current = setTimeout(() => {
-      setToast(null);
-      toastTimer.current = null;
-    }, 2200);
-  };
   notifyRef.current = notify; // let the cloud listener surface errors via the same toast
 
   // Persist owner-added subcategories locally; the full list shown everywhere merges these with
@@ -735,8 +728,13 @@ function StoreManager({ user, onLogout }) {
 
   // Prompt for and add a new subcategory. Returns the canonical name to select (existing match if
   // it's a duplicate, the new name otherwise), or null if cancelled/blank. Used by the Add/Edit forms.
-  const addCategory = useCallback(() => {
-    const raw = window.prompt("New subcategory name:");
+  const addCategory = useCallback(async () => {
+    const raw = await promptDialog({
+      title: "New subcategory",
+      label: "Subcategory name",
+      placeholder: "e.g. Lehenga",
+      confirmLabel: "Add",
+    });
     if (raw == null) return null;
     const name = raw.trim();
     if (!name) return null;
@@ -769,12 +767,19 @@ function StoreManager({ user, onLogout }) {
         notify("⚠ Couldn't save settings to cloud (saved on this device).");
       }
     },
-    [config]
+    [config, notify]
   );
 
   const resetMyPassword = async () => {
     if (!user?.email) return;
-    if (!confirm(`Send a password reset link to ${user.email}?`)) return;
+    if (
+      !(await confirmDialog({
+        title: "Reset password",
+        message: `Send a password reset link to ${user.email}?`,
+        confirmLabel: "Send link",
+      }))
+    )
+      return;
     try {
       await sendPasswordResetEmail(auth, user.email);
       notify("Reset link sent to " + user.email);
@@ -840,7 +845,15 @@ function StoreManager({ user, onLogout }) {
       const ext = (f.name.split(".").pop() || "").toLowerCase();
       const d = ext === "xlsx" || ext === "xls" ? await importXlsx(f) : JSON.parse(await f.text());
       if (!d || !Array.isArray(d.items)) throw new Error("bad file");
-      if (!confirm("Restore this backup? It will REPLACE all current data everywhere it syncs."))
+      if (
+        !(await confirmDialog({
+          title: "Restore backup",
+          message:
+            "Restore this backup? It will REPLACE all current data everywhere it syncs. This cannot be undone.",
+          confirmLabel: "Replace everything",
+          danger: true,
+        }))
+      )
         return;
       // Replacing "all current data" needs all current bills loaded, so the ones that are not
       // in the backup are removed too — not just those inside the loaded window.
@@ -1091,6 +1104,7 @@ function StoreManager({ user, onLogout }) {
                 setSales={setSales}
                 amendSale={amendSale}
                 voidSale={voidSale}
+                recordSale={recordSale}
                 salesFrom={salesFrom}
                 loadOlderSales={loadOlderSales}
                 notify={notify}
@@ -1163,7 +1177,8 @@ function StoreManager({ user, onLogout }) {
           </Suspense>
         </main>
 
-        {toast && <div style={S.toast}>{toast}</div>}
+        <ToastStack toasts={toasts} dismiss={dismissToast} />
+        <DialogHost />
       </div>
     </ShopConfigContext.Provider>
   );

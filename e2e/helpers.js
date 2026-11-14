@@ -158,3 +158,10 @@ export async function unblockDatabase(page) {
   // routeWebSocket handlers are not removed by unrouteAll; replace with a pass-through.
   await page.routeWebSocket(/127\.0\.0\.1:9000/, (ws) => ws.connectToServer());
 }
+
+/** Answer the in-app confirm / prompt dialog (src/ui/dialogs.jsx) by clicking a button in it. */
+export async function dialogClick(page, dialogTitle, buttonName) {
+  const dlg = page.getByRole("dialog", { name: dialogTitle });
+  await dlg.getByRole("button", { name: buttonName, exact: true }).click();
+  await dlg.waitFor({ state: "hidden" });
+}

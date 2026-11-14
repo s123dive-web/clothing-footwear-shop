@@ -175,7 +175,9 @@ export const CSS = `
   .tbl th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:#7A8C81; padding:6px 8px; border-bottom:2px solid #E2EAE3; }
   .tbl td { padding:9px 8px; border-bottom:1px solid #EEF3EE; }
   .tbl tr:hover td { background:#F7FAF7; }
+  .toasts { position:fixed; left:50%; transform:translateX(-50%); bottom:24px; z-index:90; display:flex; flex-direction:column; gap:8px; width:max-content; max-width:min(560px, calc(100vw - 24px)); }
   @media (max-width: 820px) {
+    .toasts { bottom:calc(88px + env(safe-area-inset-bottom, 0px)); width:auto; left:12px; right:12px; transform:none; }
     .app { flex-direction:column !important; }
     .nav { width:auto !important; height:auto !important; position:static !important;
            flex-direction:row !important; flex-wrap:wrap !important; gap:4px !important; }

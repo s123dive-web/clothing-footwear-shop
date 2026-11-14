@@ -167,6 +167,7 @@ export function SalesHistory({
   log,
   salesFrom = null,
   loadOlderSales,
+  recordSale,
 }) {
   const config = useShopConfig();
   const [open, setOpen] = useState(null);
@@ -250,11 +251,20 @@ export function SalesHistory({
   // are surfaced and retried, and a replay never adjusts stock twice. Lines without a
   // productId (misc, or legacy) touch no stock.
   const deleteSale = (s) => {
-    if (!confirm(`Delete this ${INR(s.total)} bill from ${s.date}? Stock will be added back.`))
-      return;
+    // Reversible → no "are you sure?"; a 5-second Undo re-creates the bill and takes the stock
+    // back out (a fresh outbox op, so it is as safe as the original sale).
     voidSale(s);
     log("sale", `Deleted bill ${INR(s.total)} (${s.date}) — stock restored`);
-    notify("Bill deleted, stock restored");
+    notify("Bill deleted, stock restored", {
+      action: {
+        label: "Undo",
+        run: () => {
+          recordSale(s);
+          log("sale", `Restored deleted bill ${INR(s.total)} (${s.date})`);
+          notify("Bill restored");
+        },
+      },
+    });
   };
 
   const openEdit = (s) =>

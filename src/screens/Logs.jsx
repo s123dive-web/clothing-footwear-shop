@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { confirmDialog } from "../ui/dialogs.jsx";
 import { usePagedLimit } from "../ui/hooks.js";
 import { Header, Empty } from "../ui/index.jsx";
 import { todayStr } from "../lib/format.js";
@@ -24,11 +25,15 @@ export function Logs({ logs, setLogs, notify }) {
   );
   const [limit, showMore] = usePagedLimit(200, date + "|" + type);
 
-  const clear = () => {
+  const clear = async () => {
     if (
-      confirm(
-        "Clear the entire activity log? This cannot be undone (it does not affect sales or stock)."
-      )
+      await confirmDialog({
+        title: "Clear activity log",
+        message:
+          "Clear the entire activity log? This cannot be undone (it does not affect sales or stock).",
+        confirmLabel: "Clear log",
+        danger: true,
+      })
     ) {
       setLogs([]);
       notify("Activity log cleared");

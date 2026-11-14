@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { confirmDialog } from "../ui/dialogs.jsx";
 import {
   blankDailyBill,
   validateDailyBill,
@@ -116,11 +117,13 @@ export function DailyBills({
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
-  const del = (d) => {
+  const del = async (d) => {
     if (
-      !confirm(
-        `Delete daily-need bill from “${d.vendorName}” (${INR(d.billAmount)})? It will also be removed from Vendor Bills.`
-      )
+      !(await confirmDialog({
+        title: "Delete supplier bill",
+        message: `Delete daily-need bill from “${d.vendorName}” (${INR(d.billAmount)})? It will also be removed from Vendor Bills.`,
+        danger: true,
+      }))
     )
       return;
     setDailyBills((list) => list.filter((x) => x.id !== d.id));

@@ -9,6 +9,7 @@ import {
 } from "../lib/catalog.js";
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, useRef, memo } from "react";
+import { confirmDialog, alertDialog } from "../ui/dialogs.jsx";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { normName, iconFor } from "../lib/domain.js";
 import {
@@ -147,9 +148,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
     );
     if (
       dup &&
-      !confirm(
-        `A "${product.name}" already exists in ${product.subcategory}. Save anyway as a separate product?`
-      )
+      !(await confirmDialog({
+        title: "Duplicate product",
+        message: `A "${product.name}" already exists in ${product.subcategory}. Save anyway as a separate product?`,
+        confirmLabel: "Save anyway",
+      }))
     )
       return;
     try {
@@ -167,11 +170,25 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
   };
 
   const del = async (product) => {
-    if (!confirm(`Delete “${product.name}” and all its variants? This can't be undone.`)) return;
+    // Reversible → no "are you sure?"; a 5-second Undo puts the product (and its stock) back.
     try {
       await cloudDeleteProduct(product.id);
       log("inventory", `Deleted “${product.name}”`);
-      notify("Product deleted");
+      notify("Product deleted", {
+        action: {
+          label: "Undo",
+          run: async () => {
+            try {
+              await cloudWriteProduct(product);
+              log("inventory", `Restored “${product.name}”`);
+              notify("Product restored");
+            } catch (e) {
+              console.error("restore product failed", e);
+              notify("⚠ Couldn't restore the product.");
+            }
+          },
+        },
+      });
     } catch (e) {
       console.error("delete failed", e);
       notify("⚠ Couldn't delete the product.");
@@ -445,10 +462,10 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
   };
 
   const submit = () => {
-    if (!f.name.trim()) return alert("Product name is required.");
-    if (!(Number(f.sellingPrice) > 0)) return alert("Enter a selling price greater than 0.");
+    if (!f.name.trim()) return alertDialog("Product name is required.");
+    if (!(Number(f.sellingPrice) > 0)) return alertDialog("Enter a selling price greater than 0.");
     const variants = (f.variants || []).filter((v) => v.size || v.color || Number(v.stockQty) > 0);
-    if (variants.length === 0) return alert("Add at least one size/colour variant.");
+    if (variants.length === 0) return alertDialog("Add at least one size/colour variant.");
     onSave({
       ...f,
       name: f.name.trim(),
@@ -522,10 +539,10 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
             <select
               className="input"
               value={f.subcategory}
-              onChange={(e) => {
+              onChange={async (e) => {
                 touchedSub.current = true;
                 if (e.target.value === "__add") {
-                  const nm = onAddCategory && onAddCategory();
+                  const nm = onAddCategory && (await onAddCategory());
                   if (nm) setF((s) => ({ ...s, subcategory: nm }));
                 } else set("subcategory")(e);
               }}

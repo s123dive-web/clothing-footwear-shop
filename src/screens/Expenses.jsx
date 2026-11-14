@@ -33,11 +33,20 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
   };
 
   const del = (e) => {
-    if (!confirm(`Delete expense “${e.desc}” (${INR(e.amount)})?`)) return;
+    // Reversible → no "are you sure?"; a 5-second Undo instead.
     setExpenses((list) => list.filter((x) => x.id !== e.id));
     if (editing?.id === e.id) setEditing(null);
     log("expense", `Deleted expense ${INR(e.amount)} — ${e.desc}`);
-    notify("Expense deleted");
+    notify("Expense deleted", {
+      action: {
+        label: "Undo",
+        run: () => {
+          setExpenses((list) => (list.some((x) => x.id === e.id) ? list : [...list, e]));
+          log("expense", `Restored expense ${INR(e.amount)} — ${e.desc}`);
+          notify("Expense restored");
+        },
+      },
+    });
   };
 
   const startEdit = (e) =>

@@ -107,21 +107,72 @@ export const Section = ({ title, children }) => (
   </section>
 );
 
-export function Modal({ title, children, onClose }) {
+// Open modals, innermost last — Esc and the focus trap only act for the top one.
+const modalStack = [];
+const FOCUSABLE =
+  'a[href], button:not([disabled]), input:not([disabled]):not([type="hidden"]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export function Modal({ title, children, onClose, zIndex }) {
   // Only close when the *press* started on the backdrop itself. Relying on the
   // click target alone closed the dialog whenever a drag (e.g. selecting digits
   // in a number field) began inside an input but released on the overlay.
   const downOnOverlay = useRef(false);
+  const box = useRef(null);
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
   useEffect(() => {
+    const me = {};
+    modalStack.push(me);
+    const opener = document.activeElement; // focus returns here when the dialog closes
+    const node = box.current;
+    // Initial focus: an explicit [data-autofocus], else whatever autoFocus already took,
+    // else the first control. Keeps keyboard and screen-reader users inside the dialog.
+    if (node) {
+      const wanted = node.querySelector("[data-autofocus]");
+      if (wanted) wanted.focus();
+      else if (!node.contains(document.activeElement)) {
+        const first = node.querySelector(FOCUSABLE);
+        (first || node).focus();
+      }
+    }
     const onKey = (e) => {
-      if (e.key === "Escape") onClose();
+      if (modalStack[modalStack.length - 1] !== me) return;
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== "Tab" || !node) return;
+      // Focus trap: Tab / Shift+Tab cycle within the dialog.
+      const items = [...node.querySelectorAll(FOCUSABLE)].filter((el) => el.offsetParent !== null);
+      if (!items.length) return e.preventDefault();
+      const first = items[0];
+      const last = items[items.length - 1];
+      if (
+        e.shiftKey &&
+        (document.activeElement === first || !node.contains(document.activeElement))
+      ) {
+        e.preventDefault();
+        last.focus();
+      } else if (
+        !e.shiftKey &&
+        (document.activeElement === last || !node.contains(document.activeElement))
+      ) {
+        e.preventDefault();
+        first.focus();
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+    window.addEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      const i = modalStack.indexOf(me);
+      if (i >= 0) modalStack.splice(i, 1);
+      if (opener && typeof opener.focus === "function" && document.contains(opener)) opener.focus();
+    };
+  }, []);
   return (
     <div
-      style={S.overlay}
+      style={zIndex ? { ...S.overlay, zIndex } : S.overlay}
       onMouseDown={(e) => {
         downOnOverlay.current = e.target === e.currentTarget;
       }}
@@ -132,12 +183,12 @@ export function Modal({ title, children, onClose }) {
       aria-modal="true"
       aria-label={title}
     >
-      <div style={S.modal}>
+      <div style={S.modal} ref={box} tabIndex={-1}>
         <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
           <h2 style={{ margin: 0, fontSize: 17 }}>{title}</h2>
           <button
-            className="btn ghost small"
-            style={{ marginLeft: "auto" }}
+            className="btn ghost"
+            style={{ marginLeft: "auto", minWidth: 44, minHeight: 44, padding: 0 }}
             aria-label="Close dialog"
             onClick={onClose}
           >

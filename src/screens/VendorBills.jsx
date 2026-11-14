@@ -1,5 +1,6 @@
 import { todayStr, uid, money, INR, dateStr } from "../lib/format.js";
 import { useState, useRef, useMemo } from "react";
+import { confirmDialog } from "../ui/dialogs.jsx";
 import { MAX_PROOF_BYTES, uploadBillProof, deleteBillProof, PROOF_ACCEPT } from "../lib/bills.js";
 import { Header, Field, Card, Empty } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
@@ -159,7 +160,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
     const msg = synced
       ? `Delete “${b.vendor}” (${INR(b.amount)})? This also removes it from Supplier Bills.`
       : `Delete bill from “${b.vendor}” (${INR(b.amount)})? Its proof file will also be removed.`;
-    if (!confirm(msg)) return;
+    if (!(await confirmDialog({ title: "Delete bill", message: msg, danger: true }))) return;
     await deleteBillProof(b.filePath);
     setBills((list) => list.filter((x) => x.id !== b.id));
     // Delete-from-either-side: drop the matching daily record too (linked by shared id).
