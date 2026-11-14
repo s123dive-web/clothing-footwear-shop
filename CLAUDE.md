@@ -71,6 +71,32 @@ counter, mostly on a phone, with real sales data.** Read the hard rules before c
   an input that already has a label, it overrides it); text contrast ≥ 4.5:1; on phones every
   control ≥ 44 px (`.tap`, `.step`, and the `(pointer: coarse)` block in `ui/styles.js`); no
   horizontal scrolling at 390 px.
+- **Feature flags** — `src/config/features.js`. Every Phase 4 feature is `false` there and
+  must stay `false` until the owner approves it; switching one on = change the value, merge,
+  deploy. `featureOn(name)` is the only check. In dev / emulator builds a flag can also be
+  switched on per browser via localStorage `cfs-features-dev` (that is how e2e tests reach
+  them; `enableFeatures(page, [...])`); production builds ignore that override. **A feature
+  that is off must show nothing and write nothing** — `features.spec.js` pins this.
+
+  | Flag | What it adds | Where |
+  |---|---|---|
+  | `paymentSettings` | UPI ID, uploadable payment QR, receipt width 58/80 mm | Settings, `lib/print.js` |
+  | `billNumbers` | `2026-27/0001` per financial year; provisional offline | `lib/billNumbers.js`, root numbering effect |
+  | `whatsappReceipt` | "Send on WhatsApp" (`wa.me` link, plain-text bill) | `lib/whatsapp.js` |
+  | `dayClose` | Day Close tab: cash / UPI / credit, expected vs counted | `lib/dayClose.js`, `screens/DayClose.jsx` |
+  | `backupReminder` | "Last backup N days ago" + weekly reminder on Dashboard | `lib/backupReminder.js` |
+  | `customerLedger` | Customers tab, outstanding, WhatsApp reminder | `lib/customers.js`, `screens/Customers.jsx` |
+  | `restockSuggestions` | Restock tab: sell-through, days left, order qty | `lib/restock.js`, `screens/Restock.jsx` |
+  | `gstInvoice` | HSN + GST rate per product; CGST/SGST split on receipt | `lib/gst.js` |
+  | `returns` | Return / exchange from a bill; credit on a new bill | `lib/returns.js`, `ops.returnSaleOp` |
+  | `barcode` | Camera scan in Billing; Code 128 labels | `lib/barcode.js`, `ui/BarcodeScanner.jsx` |
+  | `staffAccounts` | owner / staff roles | `config/role.js`, `screens/StaffAccounts.jsx`, rules |
+
+- **Roles** (`staffAccounts`): `RoleGate` in the root resolves `owner` / `staff` / `none` from
+  `shop/users/<uid>` before mounting anything; screens use `useIsStaff()`. Staff get
+  `STAFF_TABS`, subscribe only to `STAFF_SLICES`, and never see cost / profit controls. **The
+  UI is not the security boundary — `database.rules.json` is**, and RTDB cannot hide fields: a
+  staff account can read cost and profit through the API.
 - **`src/lib/`** — pure, unit-tested helpers: `sync.js` (array↔map bridge, `buildSliceUpdate`,
   3-way `mergeRemote`, `updateItemAtomic`, `sendOp`, sales queries), `ops.js`, `outbox.js`,
   `localdb.js`, `salesWindow.js`, `products.js` (variants, stock maths, `normalizeProduct`),
@@ -173,6 +199,19 @@ arrays and empty objects, so every reader must tolerate missing fields.
 | `shop/shopConfig` | single object: `{ name, tagline, address, phone, email, gstin, currency, logoUrl (may be an inline base64 data-URL), receiptFooter, footwearSizeMin, footwearSizeMax }` |
 | `shop/meta/seeded` | `true` once the demo catalogue has been seeded (stops it resurrecting) |
 | `shop/meta/customSubcats/<key>` | `"Display Name"` — owner-added subcategories (key = `subcatKey(name)`) |
+| `shop/meta/billCounters/<fy>` | (flag `billNumbers`) `{ next, recent: { <saleId>: n } }` — transaction counter |
+| `shop/meta/lastBackupAt` | (flag `backupReminder`) ms timestamp of the last full backup |
+| `shop/dayCloses/<YYYY-MM-DD>` | (flag `dayClose`) `{ date, opening, expected, counted, diff, at }` |
+| `shop/users/<uid>` | (flag `staffAccounts`) `{ role: "staff", email, addedAt }` |
+
+Optional fields added by Phase 4 features (present only once the feature has been used):
+
+- sale: `billNo`, `billNoProv`, `createdAt` (billNumbers); `creditUsed`, `creditOf` (returns);
+  `type: "return"`, `refOf`, `refBillNo` on a return bill, whose `total` / `profit` / line `qty`
+  / `amount` are **negative**; line `returned` on the original bill.
+- sale line: `gstRate`, `hsn` (gstInvoice).
+- item: `hsn`, `gstRate` (gstInvoice).
+- shopConfig: `upiId`, `paymentQrUrl`, `receiptWidth` (paymentSettings).
 
 Storage: bill proof files at `shop/bills/<billId>/<file>` (≤ 10 MB).
 
@@ -208,6 +247,21 @@ read `shop/meta/seeded` and ignore it. Roll back: revert the code; delete the no
 **Phase 1 — bill writes.** Bills are still plain records at `shop/sales/<id>` with the same
 fields; nothing about their shape changed. They are now written by a multi-path update at
 `shop/` instead of at `shop/sales/` — same resulting data.
+
+**Phase 4 — optional additions only, each written only when its flag is on.** See the tables
+above. Notes on compatibility:
+- `normalizeConfig` / `normalizeProduct` pass the new optional fields through; old records
+  load unchanged; with all flags off nothing new is ever written (`features.spec.js`).
+- Stock ops are now sign-aware (`outQty = qty − returned`): identical for ordinary bills; a
+  return bill's negative quantities restock. An OLD app version that deletes a bill which has
+  returns would restock the full quantity (it does not know `returned`) — turn `returns` on
+  only once every device runs this version.
+- A return bill has negative totals. Old versions display it as a negative bill and reports net
+  it off; they must not be used to edit or delete it.
+- `database.rules.json` now has per-path staff grants. With no `shop/users` entries it behaves
+  exactly like the previous owner-only rules. **Not deployed by us.**
+- Roll back any feature: set its flag to `false`. Data it wrote stays and is ignored, except
+  return bills (they keep netting off sales, which is correct) and bill numbers (still shown).
 
 **Phase 3 — no cloud data-model change.** New device-local localStorage keys only:
 `cfs-held-bills-v1` (held bills), `cfs-lang-v1` (language).
@@ -268,6 +322,10 @@ email (see `resetEmulator` in `e2e/helpers.js`), and sign in.
 - `e2e/i18n.spec.js` — language toggle: menus, Billing, toast, receipt; persistence.
 - Helpers: `dialogClick(page, title, button)` answers an in-app dialog; `receiptHtml(page,
   click)` captures a printed receipt.
+- `e2e/features.spec.js` — Phase 4 features (flags switched on per test) and the "all flags
+  off shows and writes nothing" check. `e2e/barcode.spec.js` — typed code, label barcode decoded
+  with ZXing, fake-camera scan. `e2e/staff.spec.js` — owner adds / removes staff, staff UI.
+  `e2e/rules.spec.js` — `@firebase/rules-unit-testing` against `database.rules.json`.
 - One worker, shared emulator; every test wipes the database first. Tests never use
   `page.waitForTimeout` to "wait for sync" — poll the emulator with `eventually(...)`.
 
@@ -335,6 +393,17 @@ Automated (Playwright `usability.spec.js`, `a11y.spec.js`, `i18n.spec.js`, must 
       no sideways scroll, visible focus ring
 - [ ] Hindi / Marathi: menus, Billing, toast, receipt; choice survives a reload
 
+Automated (Playwright `features.spec.js`, `barcode.spec.js`, `staff.spec.js`, `rules.spec.js`):
+
+- [ ] All flags off: no feature UI anywhere, bill and line records have only the baseline keys,
+      nothing new under `shop/meta`, `shop/users`, `shop/dayCloses`
+- [ ] Each feature, switched on: payment settings on receipt; bill numbers sequential + offline
+      provisional → final; WhatsApp link; day close totals and save; backup reminder; customer
+      ledger; restock; GST split; return (refund) and exchange (credit); barcode typed / label
+      decode / camera; staff account lifecycle
+- [ ] Rules: owner full access; staff limited exactly as documented; strangers and signed-out
+      get nothing; nobody can grant themselves a role
+
 Unit (vitest): `outbox.test.js` (write-ahead, order, replay, idempotency, crash mid-replay,
 failure + backoff, retryNow), `ops.test.js`, `localdb.test.js`, `salesWindow.test.js`,
 `print.test.js`, `syncStatus.test.js`, `i18n/i18n.test.js`.
@@ -346,6 +415,12 @@ Not automated — check by hand on a real phone after anything that touches them
 - [ ] Vendor / Supplier bill proof upload and view (Firebase Storage)
 - [ ] Data Import from a PDF / pasted text
 - [ ] Mobile layout (< 820 px): sidebar, Billing grid, modals
+- [ ] Before switching on any Phase 4 flag: try it against the emulator (`cfs-features-dev`)
+- [ ] `barcode`: real camera on the shop phone; a printed label scans; label size on the printer
+- [ ] `paymentSettings`: 58 mm and 80 mm receipts on the real thermal printer
+- [ ] `gstInvoice`: an accountant checks the invoice format and rates
+- [ ] `staffAccounts`: deploy the rules first; sign in as staff on a second phone
+- [ ] `whatsappReceipt`: link opens WhatsApp with the right number on Android
 - [ ] Hindi and Marathi wording read by a native speaker (translations were written without
       one); receipt prints Devanagari correctly on the thermal printer
 - [ ] Numeric keypad really opens on the shop's phone for amount / quantity fields

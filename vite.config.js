@@ -40,7 +40,7 @@ export default defineConfig(({ command }) => ({
         globPatterns: ["**/*.{js,css,html,jpg,png,webmanifest}"],
         // Heavy and rarely used at the counter (spreadsheet + PDF import/export): fetched and
         // cached the first time they are needed instead of on install.
-        globIgnores: ["**/xlsx-*.js", "**/pdf-*.js", "**/pdf.worker*"],
+        globIgnores: ["**/xlsx-*.js", "**/pdf-*.js", "**/pdf.worker*", "**/zxing-*.js"],
         cleanupOutdatedCaches: true,
         navigateFallback: "index.html",
         runtimeCaching: [
@@ -64,6 +64,9 @@ export default defineConfig(({ command }) => ({
         manualChunks: {
           react: ["react", "react-dom"],
           firebase: ["firebase/app", "firebase/auth", "firebase/database", "firebase/storage"],
+          // Barcode-scanner fallback: only ever reached through a dynamic import; named so the
+          // service worker can leave it out of the install-time precache.
+          zxing: ["@zxing/browser", "@zxing/library"],
         },
       },
     },

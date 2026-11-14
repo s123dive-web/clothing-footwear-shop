@@ -186,3 +186,22 @@ export async function receiptHtml(page, click) {
   await expect.poll(() => page.evaluate(() => window.__receipt)).toBeTruthy();
   return page.evaluate(() => window.__receipt);
 }
+
+/**
+ * Switch on Phase 4 features for this browser context (they are OFF in src/config/features.js).
+ * Works only in dev / emulator builds — see featureOn(). Call before the page loads.
+ */
+export async function enableFeatures(page, names) {
+  await page.addInitScript((list) => {
+    localStorage.setItem(
+      "cfs-features-dev",
+      JSON.stringify(Object.fromEntries(list.map((n) => [n, true])))
+    );
+  }, names);
+}
+
+/** Today's date as YYYY-MM-DD in the browser's (= test machine's) local time zone. */
+export function todayStr(offsetDays = 0) {
+  const d = new Date(Date.now() + offsetDays * 86400000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}

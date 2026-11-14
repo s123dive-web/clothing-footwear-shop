@@ -1,3 +1,5 @@
+import { gstSplit, isGstInvoice } from "./gst.js";
+import { billNoText } from "./billNumbers.js";
 import { escapeHtml, INR, money } from "./format.js";
 import { DEFAULT_SHOP_CONFIG } from "../config/shopConfig.js";
 
@@ -32,7 +34,10 @@ export function whenImagesReady(imgs, capMs = PRINT_IMAGE_WAIT_MS) {
 // not wait on the network. Called when the Billing screen opens.
 export function preloadReceiptAssets(config) {
   if (typeof Image === "undefined") return;
-  for (const src of [(config && config.logoUrl) || assetUrl(LOGO_SRC), assetUrl(PAYMENT_QR_SRC)]) {
+  for (const src of [
+    (config && config.logoUrl) || assetUrl(LOGO_SRC),
+    (config && config.paymentQrUrl) || assetUrl(PAYMENT_QR_SRC),
+  ]) {
     const img = new Image();
     img.decoding = "async";
     img.src = src;
@@ -110,13 +115,33 @@ export const lineVariantText = (l, t = identity) =>
 // Build a thermal-style receipt and send it to the printer. `config` is the shop config
 // (name, address, gstin, phone, receipt footer, currency, logo) — nothing is hardcoded.
 export function printReceipt(sale, config = DEFAULT_SHOP_CONFIG, t = identity) {
+  // GST invoice: only when the shop has a GSTIN and the bill carries a taxed line.
+  const gstInv = isGstInvoice(sale, config);
+  const gst = gstInv ? gstSplit(sale) : null;
+  const gstTable = gst
+    ? `<table class="gst"><tr><th>GST%</th><th class="r">${escapeHtml(t("Taxable"))}</th><th class="r">CGST</th><th class="r">SGST</th></tr>${gst.rows
+        .map(
+          (r) =>
+            `<tr><td>${r.rate}%</td><td class="r">${INR(r.taxable)}</td><td class="r">${INR(r.cgst)}</td><td class="r">${INR(r.sgst)}</td></tr>`
+        )
+        .join(
+          ""
+        )}<tr class="tot"><td>${escapeHtml(t("Total"))}</td><td class="r">${INR(gst.taxable)}</td><td class="r">${INR(gst.cgst)}</td><td class="r">${INR(gst.sgst)}</td></tr></table><div class="meta">${escapeHtml(t("Prices include GST"))}</div>`
+    : "";
   const rows = sale.lines
     .map((l) => {
       const vt = lineVariantText(l, t);
-      return `<tr><td>${escapeHtml(l.name)}${vt ? `<div class="var">${escapeHtml(vt)}</div>` : ""}</td><td class="c">${l.qty}</td><td class="r">${INR(l.amount)}</td></tr>`;
+      return `<tr><td>${escapeHtml(l.name)}${vt ? `<div class="var">${escapeHtml(vt)}</div>` : ""}${gstInv && l.hsn ? `<div class="var">HSN ${escapeHtml(l.hsn)} · GST ${Number(l.gstRate) || 0}%</div>` : ""}</td><td class="c">${l.qty}</td><td class="r">${INR(l.amount)}</td></tr>`;
     })
     .join("");
   const logo = config.logoUrl || assetUrl(LOGO_SRC);
+  const qr = config.paymentQrUrl || assetUrl(PAYMENT_QR_SRC);
+  const billNo = billNoText(sale);
+  // Paper width: 58 mm and 80 mm rolls print about 48 mm / 72 mm wide. 0 = the classic layout.
+  const mm = config.receiptWidth === 58 ? 48 : config.receiptWidth === 80 ? 72 : 0;
+  const page = mm
+    ? `@page{size:${config.receiptWidth}mm auto;margin:0}body{width:${mm}mm;padding:2mm;font-size:${mm < 60 ? 11 : 12}px}`
+    : "";
   printHtml(
     `<style>body{font-family:'Courier New',monospace;padding:10px;width:280px;color:#000}
     h2{text-align:center;margin:4px 0}.meta{text-align:center;font-size:11px}
@@ -128,13 +153,17 @@ export function printReceipt(sale, config = DEFAULT_SHOP_CONFIG, t = identity) {
     .ft{text-align:center;font-size:11px;margin-top:8px;border-top:1px dashed #000;padding-top:6px;white-space:pre-line}
     .pay{text-align:center;margin-top:10px;border-top:1px dashed #000;padding-top:8px}
     .pay img{width:150px;height:150px;object-fit:contain}
-    .pay .lbl{font-size:11px;font-weight:bold;margin-top:2px}</style>
+    .pay .lbl{font-size:11px;font-weight:bold;margin-top:2px}
+    .gst{font-size:10.5px;margin-top:8px}.gst th{text-align:left;border-bottom:1px dashed #000;font-weight:bold}.gst th.r{text-align:right}${page}${mm && mm < 60 ? "table{font-size:11px}.pay img{width:36mm;height:36mm}" : ""}</style>
     <img class="logo" src="${escapeHtml(logo)}" alt="" onerror="this.style.display='none'" />
     <h2>${escapeHtml(config.name)}</h2>
+    ${gstInv ? `<div class="meta"><b>${escapeHtml(t("TAX INVOICE"))}</b></div>` : ""}
+    ${sale.type === "return" ? `<div class="meta"><b>${escapeHtml(t("RETURN"))}</b>${sale.refBillNo ? " · " + escapeHtml(t("Bill no: {no}", { no: sale.refBillNo })) : ""}</div>` : ""}
     ${config.address ? `<div class="meta">${escapeHtml(config.address)}</div>` : ""}
     ${config.phone ? `<div class="meta">☎ ${escapeHtml(config.phone)}</div>` : ""}
     ${config.gstin ? `<div class="meta">GSTIN: ${escapeHtml(config.gstin)}</div>` : ""}
     <div class="meta">${escapeHtml(sale.date)} &nbsp; ${escapeHtml(sale.time)}</div>
+    ${billNo ? `<div class="meta">${escapeHtml(t("Bill no: {no}", { no: billNo }))}</div>` : ""}
     <table>${rows}
     ${
       sale.discount > 0
@@ -143,14 +172,22 @@ export function printReceipt(sale, config = DEFAULT_SHOP_CONFIG, t = identity) {
         : ""
     }
     <tr class="tot"><td>${escapeHtml(t("TOTAL"))}</td><td></td><td class="r">${INR(sale.total)}</td></tr>
+    ${
+      sale.creditUsed > 0
+        ? `<tr><td>${escapeHtml(t("Exchange credit"))}</td><td></td><td class="r">−${INR(sale.creditUsed)}</td></tr>
+    <tr class="tot"><td>${escapeHtml(t("To pay"))}</td><td></td><td class="r">${INR((sale.total || 0) - sale.creditUsed)}</td></tr>`
+        : ""
+    }
     </table>
     ${sale.payment ? `<div class="meta">${escapeHtml(t("Paid via {mode}", { mode: t(sale.payment) }))}${sale.customer ? " — " + escapeHtml(sale.customer) : ""}</div>` : ""}
     ${sale.customer || sale.mobile ? `<div class="meta">${escapeHtml(t("Customer: {name}", { name: sale.customer || "—" }))}${sale.mobile ? " · " + escapeHtml(sale.mobile) : ""}</div>` : ""}
     ${sale.payment === "Udhari" ? `<div class="meta">${escapeHtml(t("Paid now: {amount}", { amount: INR(sale.paid || 0) }))}${sale.paidMode ? " (" + escapeHtml(t(sale.paidMode)) + ")" : ""} &nbsp; ${escapeHtml(t("Balance due: {amount}", { amount: INR(Math.max(0, (sale.total || 0) - (sale.paid || 0))) }))}</div>` : ""}
+    ${gstTable}
     ${config.receiptFooter ? `<div class="ft">${escapeHtml(config.receiptFooter)}</div>` : ""}
     <div class="pay">
-      <img src="${assetUrl(PAYMENT_QR_SRC)}" alt="Scan to pay" onerror="this.style.display='none'" />
+      <img src="${escapeHtml(qr)}" alt="Scan to pay" onerror="this.style.display='none'" />
       <div class="lbl">${escapeHtml(t("Scan to Pay · UPI"))}</div>
+      ${config.upiId ? `<div class="meta">${escapeHtml(config.upiId)}</div>` : ""}
     </div>`,
     t("Receipt")
   );

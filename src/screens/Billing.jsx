@@ -1,5 +1,11 @@
 import { useShopConfig } from "../config/shopConfig.js";
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, lazy, Suspense } from "react";
+import { useIsStaff } from "../config/role.js";
+import { matchCode } from "../lib/barcode.js";
+import { creditToUse } from "../lib/returns.js";
+import { featureOn } from "../config/features.js";
+import { provisionalNo } from "../lib/billNumbers.js";
+import { waLink, receiptText } from "../lib/whatsapp.js";
 import { useLang } from "../i18n/index.jsx";
 import { useDebouncedValue } from "../ui/hooks.js";
 import { todayStr, money, uid, INR } from "../lib/format.js";
@@ -9,6 +15,11 @@ import { Header, Empty, Modal } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 import { CURRENCY } from "../config/currency.js";
 import { printReceipt, preloadReceiptAssets } from "../lib/print.js";
+
+// The camera scanner (and the ZXing fallback it may pull in) loads only when it is opened.
+const BarcodeScanner = lazy(() =>
+  import("../ui/BarcodeScanner.jsx").then((m) => ({ default: m.BarcodeScanner }))
+);
 
 const HELD_KEY = "cfs-held-bills-v1";
 const loadHeldBills = () => {
@@ -31,7 +42,18 @@ const heldLabel = (b) =>
   new Date(b.at || Date.now()).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
 // ---------- Billing / POS ----------
-export function Billing({ items, sales, recordSale, online, notify, log, goInventory }) {
+export function Billing({
+  items,
+  sales,
+  recordSale,
+  online,
+  notify,
+  log,
+  goInventory,
+  exchangeCredit = null,
+  setExchangeCredit,
+}) {
+  const staff = useIsStaff(); // staff do not see or enter cost prices
   const { t } = useLang();
   const config = useShopConfig();
   const [q, setQ] = useState("");
@@ -188,6 +210,10 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           purchasePrice: money(product.purchasePrice),
           category: product.category,
           subcategory: product.subcategory,
+          // Feature "gstInvoice": the tax details are snapshotted onto the bill line.
+          ...(featureOn("gstInvoice") && product.gstRate > 0
+            ? { gstRate: product.gstRate, hsn: product.hsn || "" }
+            : {}),
           qty: 1,
         },
       ];
@@ -263,6 +289,12 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       : Math.min(subtotal, money(discNum));
   const total = money(subtotal - discountAmt);
   const profit = money(grossProfit - discountAmt);
+  // Feature "returns": credit from an exchange is taken off what the customer pays for this
+  // bill (not off the bill's value — the return bill already reversed that revenue).
+  const [applyCredit, setApplyCredit] = useState(true);
+  const creditOn = featureOn("returns") && exchangeCredit && pay !== "Udhari" && applyCredit;
+  const creditUsed = creditOn ? creditToUse(exchangeCredit.amount, total) : 0;
+  const toCollect = money(total - creditUsed);
 
   const currentBill = () => ({
     id: uid(),
@@ -332,6 +364,37 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       .slice(0, 8);
   }, [items, soldQty, lastSold]);
 
+  // The bill just made, as it is NOW in the synced list (so it carries its bill number once that
+  // has been allocated), falling back to the copy taken at the moment of sale.
+  const salesRef = useRef(sales);
+  salesRef.current = sales;
+  const liveSale = () =>
+    (lastSale && salesRef.current.find((x) => x.id === lastSale.id)) || lastSale;
+  const lastSaleLive = liveSale();
+  const printLast = async () => {
+    // Online, the real bill number arrives a moment after the sale — wait for it (briefly)
+    // rather than print a provisional one. Offline it prints provisional straight away.
+    if (featureOn("billNumbers") && online) {
+      for (let i = 0; i < 15 && liveSale()?.billNoProv && !liveSale()?.billNo; i++)
+        await new Promise((r) => setTimeout(r, 100));
+    }
+    printReceipt(liveSale(), config, t);
+  };
+
+  // Feature "barcode": a scanned code adds its variant straight to the bill.
+  const [scanning, setScanning] = useState(false);
+  const onScan = (code) => {
+    const hit = matchCode(items, code);
+    if (!hit) return notify(`No product for code “${code}”`);
+    if (hit.variant) {
+      addVariant(hit.product, hit.variant);
+      notify(`Added ${hit.product.name} — ${variantLabel(hit.variant)}`);
+    } else {
+      setScanning(false);
+      openProduct(hit.product);
+    }
+  };
+
   const completeSale = () => {
     if (cart.length === 0 || soldCart.current === cart) return;
     // Re-check against the freshest variant stock (another device may have sold since).
@@ -373,6 +436,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
         color: c.color || "",
         category: c.category || "",
         subcategory: c.subcategory || "",
+        ...(c.gstRate > 0 ? { gstRate: c.gstRate, ...(c.hsn ? { hsn: c.hsn } : {}) } : {}),
         ...(c.misc ? { misc: true } : { productId: c.productId, variantId: c.variantId }),
       })),
       total,
@@ -389,6 +453,11 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       ...(mobile.trim() ? { mobile: mobile.trim() } : {}),
       ...(pay === "Udhari" ? { paid: Math.min(total, Math.max(0, money(+paidNow || 0))) } : {}),
       ...(pay === "Udhari" && +paidNow > 0 ? { paidMode } : {}),
+      // Feature "billNumbers": provisional now, the sequential number arrives once online.
+      ...(creditUsed > 0 ? { creditUsed, creditOf: exchangeCredit.returnId } : {}),
+      ...(featureOn("billNumbers")
+        ? { billNoProv: provisionalNo(now.getTime()), createdAt: now.getTime() }
+        : {}),
     };
     // One outbox op = the bill + its stock decrement. It is recorded on this device at once and
     // delivered (and retried / replayed) in the background, so the counter never waits on the
@@ -404,6 +473,8 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
         (customer.trim() ? ` (${customer.trim()})` : "") +
         (backDated ? ` · back-dated to ${saleDate}` : "")
     );
+    if (creditUsed > 0)
+      setExchangeCredit?.({ ...exchangeCredit, amount: money(exchangeCredit.amount - creditUsed) });
     clearBill();
     searchRef.current?.focus();
     notify(
@@ -447,7 +518,6 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           <input
             ref={searchRef}
             className="input"
-            aria-label="Search name / brand / code"
             placeholder={t("Search name / brand / code… (Enter opens top match)")}
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -455,6 +525,15 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
             aria-label="Search products or scan barcode"
             style={{ marginBottom: 12 }}
           />
+          {featureOn("barcode") && (
+            <button
+              className="btn tap"
+              style={{ width: "100%", marginBottom: 12 }}
+              onClick={() => setScanning(true)}
+            >
+              📷 Scan barcode
+            </button>
+          )}
           <div
             style={{
               display: "flex",
@@ -474,7 +553,6 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
             <input
               className="input"
               style={{ flex: 1, minWidth: 0 }}
-              aria-label="Name (optional)"
               placeholder={t("Name (optional)")}
               value={miscName}
               onChange={(e) => setMiscName(e.target.value)}
@@ -483,23 +561,24 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               }}
               aria-label="Misc item name"
             />
-            <input
-              className="input"
-              style={{ width: 78 }}
-              type="number"
-              inputMode="decimal"
-              min="0"
-              step="0.01"
-              aria-label="buy"
-              placeholder={t("buy")}
-              value={miscBuy}
-              onChange={(e) => setMiscBuy(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") addMisc();
-              }}
-              aria-label="Misc buy price (optional)"
-              title="Buy / cost price (optional) — used for profit"
-            />
+            {!staff && (
+              <input
+                className="input"
+                style={{ width: 78 }}
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                placeholder={t("buy")}
+                value={miscBuy}
+                onChange={(e) => setMiscBuy(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") addMisc();
+                }}
+                aria-label="Misc buy price (optional)"
+                title="Buy / cost price (optional) — used for profit"
+              />
+            )}
             <input
               className="input"
               style={{ width: 86 }}
@@ -507,7 +586,6 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               inputMode="decimal"
               min="0"
               step="0.01"
-              aria-label="sell"
               placeholder={t("sell")}
               value={miscPrice}
               onChange={(e) => setMiscPrice(e.target.value)}
@@ -726,7 +804,6 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               inputMode="decimal"
               min="0"
               step="0.01"
-              aria-label="0"
               placeholder="0"
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
@@ -789,6 +866,43 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
             </div>
           </div>
 
+          {featureOn("returns") && exchangeCredit && (
+            <div
+              role="status"
+              style={{
+                background: "#FFF8E6",
+                border: "1.5px solid #E3B34A",
+                borderRadius: 10,
+                padding: "8px 10px",
+                margin: "8px 0",
+                fontSize: 13,
+              }}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={applyCredit}
+                  onChange={(e) => setApplyCredit(e.target.checked)}
+                />
+                <span>
+                  ↩ Exchange credit <b>{INR(exchangeCredit.amount)}</b>
+                  {exchangeCredit.customer ? ` (${exchangeCredit.customer})` : ""} — use on this
+                  bill
+                </span>
+              </label>
+              {creditUsed > 0 && (
+                <div style={{ fontWeight: 800, marginTop: 4 }}>
+                  Credit used {INR(creditUsed)} · To collect {INR(toCollect)}
+                </div>
+              )}
+              {pay === "Udhari" && (
+                <div style={{ color: "#6B4700", marginTop: 4 }}>
+                  Credit cannot be used on a credit (Udhari) bill.
+                </div>
+              )}
+            </div>
+          )}
+
           {/* payment */}
           <div style={{ display: "flex", gap: 6, margin: "10px 0" }}>
             {["UPI", "Cash", "Udhari"].map((p) => (
@@ -850,7 +964,6 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           <input
             className="input"
             style={{ marginBottom: 8 }}
-            aria-label="Mobile (optional)"
             placeholder={t("Mobile (optional)")}
             value={mobile}
             onChange={(e) => setMobile(e.target.value)}
@@ -865,7 +978,6 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
                 type="number"
                 inputMode="decimal"
                 min="0"
-                aria-label="Paid now (optional)"
                 placeholder={t("Paid now (optional)")}
                 value={paidNow}
                 onChange={(e) => setPaidNow(e.target.value)}
@@ -912,16 +1024,32 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           </div>
           <div className="bill-bar-spacer" />
           {lastSale && (
-            <button
-              className="btn"
-              style={{ width: "100%", marginTop: 8 }}
-              onClick={() => printReceipt(lastSale, config, t)}
-            >
+            <button className="btn" style={{ width: "100%", marginTop: 8 }} onClick={printLast}>
               {t("🧾 Print last receipt")}
             </button>
           )}
+          {lastSale && featureOn("whatsappReceipt") && (
+            <a
+              className="btn wa"
+              style={{ width: "100%", marginTop: 8 }}
+              href={waLink(
+                lastSaleLive.mobile,
+                receiptText(lastSaleLive, config, { t, money: INR })
+              )}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              🟢 {t("Send on WhatsApp")}
+            </a>
+          )}
         </section>
       </div>
+
+      {scanning && (
+        <Suspense fallback={null}>
+          <BarcodeScanner onDetect={onScan} onClose={() => setScanning(false)} />
+        </Suspense>
+      )}
 
       {/* variant picker modal */}
       {picker && (

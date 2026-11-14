@@ -1,4 +1,6 @@
 import { useState, useMemo } from "react";
+import { featureOn } from "../config/features.js";
+import { StaffAccounts } from "./StaffAccounts.jsx";
 import { normName } from "../lib/domain.js";
 import {
   productStock,
@@ -221,6 +223,7 @@ export function Admin({ items, setSales, setExpenses, setLogs, user, notify, log
         title="Admin"
         sub="Bulk & destructive operations · double-confirm + password required"
       />
+      {featureOn("staffAccounts") && <StaffAccounts notify={notify} log={log} />}
       {groups.map((grp) => (
         <section key={grp} style={{ ...S.panel, marginBottom: 16 }}>
           <div

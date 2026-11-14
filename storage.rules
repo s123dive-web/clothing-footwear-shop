@@ -4,6 +4,10 @@ rules_version = '2';
 // (see src/lib/bills.js). Access requires authentication and is locked to the single shop-owner
 // account — these rules are the only gate, since the Firebase config is public.
 //
+// Staff accounts (see database.rules.json) get NO access here: bill proofs belong to vendor /
+// supplier bills, which staff cannot see. Storage rules cannot read the Realtime Database, so
+// "owner only" is expressed, as before, by the owner's email.
+//
 // SETUP (do this once):
 //   1. Replace OWNER_EMAIL below with the owner's sign-in email.
 //   2. Deploy:  firebase deploy --only storage

@@ -4,20 +4,33 @@
     // Realtime Database access for the Clothing & Footwear Shop Manager.
     //
     // Authentication is REQUIRED for every read and write — there are no open
-    // rules. By default access is further locked to the single shop-owner
-    // account (recommended). The Firebase config in src/config/firebase.js is
-    // public by design, so these rules are the only gate on the data.
+    // rules. The Firebase config in src/config/firebase.js is public by design,
+    // so these rules are the only gate on the data.
     //
-    // SETUP (do this once, before relying on the app):
-    //   1. Replace OWNER_EMAIL below with the owner's sign-in email.
-    //   2. Deploy:  firebase deploy --only database
-    //   (Firebase RTDB rules allow these // comments; they're stripped on deploy.)
+    // Two kinds of account:
+    //   OWNER — the single account whose sign-in email is written below. Full
+    //           read and write of everything. (Unchanged from before.)
+    //   STAFF — any account the owner has listed at shop/users/<uid> with
+    //           role "staff" (Admin → Staff accounts). Staff may:
+    //             • read products, bills, shop settings and shop/meta;
+    //             • create and edit bills, but never delete one;
+    //             • change an existing product (stock moves), but never create
+    //               or delete one;
+    //             • add activity-log entries;
+    //             • take the next bill number.
+    //           Staff may NOT read expenses, vendor / supplier bills, day
+    //           closes or the user list, and may not write anything else.
+    //           With no entries under shop/users these rules behave exactly
+    //           like the owner-only rules they replace.
     //
-    // Prefer "any signed-in user" instead of a single owner? Replace both lines
-    // with:  ".read": "auth != null", ".write": "auth != null"
+    // NOTE: the Realtime Database cannot hide individual fields. A staff account
+    // can read whole product and bill records, including cost price and profit,
+    // through the API. The app hides them from staff on screen; that is a
+    // convenience, not a security boundary.
     //
-    // Optional hardening: append  && auth.token.email_verified == true  to both
-    // lines once the owner's email is verified, to reject unverified sign-ins.
+    // SETUP: replace the owner email below (every occurrence) with the owner's
+    // sign-in email, then deploy:  firebase deploy --only database
+    // (Firebase RTDB rules allow these // comments; they're stripped on deploy.)
     // ----------------------------------------------------------------------
     ".read": "auth != null && auth.token.email == 'vijaykshopvarje@gmail.com'",
     ".write": "auth != null && auth.token.email == 'vijaykshopvarje@gmail.com'",
@@ -26,7 +39,42 @@
         // The app loads only recent bills (by date) and all credit bills (by payment) — see
         // src/lib/salesWindow.js. These indexes let the server do that filtering; without
         // them the queries still work but download every bill first.
-        ".indexOn": ["date", "payment"]
+        ".indexOn": ["date", "payment"],
+        ".read": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'",
+        "$saleId": {
+          // staff: create or edit, never delete
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && newData.exists()"
+        }
+      },
+      "items": {
+        ".read": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'",
+        "$itemId": {
+          // staff: change an existing product (selling moves its stock), never create or delete
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && data.exists() && newData.exists()"
+        }
+      },
+      "logs": {
+        "$logId": {
+          // staff: append only
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && !data.exists() && newData.exists()"
+        }
+      },
+      "shopConfig": {
+        ".read": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'"
+      },
+      "meta": {
+        ".read": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'",
+        "billCounters": {
+          "$fy": {
+            ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'"
+          }
+        }
+      },
+      "users": {
+        "$uid": {
+          // everyone may read their OWN entry (that is how the app learns its role)
+          ".read": "auth != null && auth.uid == $uid"
+        }
       }
     }
   }

@@ -11,7 +11,12 @@
 // private (see firebase.example.js and the README for the setup steps).
 // ---------------------------------------------------------------------------
 import { initializeApp } from "firebase/app";
-import { getAuth, connectAuthEmulator } from "firebase/auth";
+import {
+  getAuth,
+  connectAuthEmulator,
+  createUserWithEmailAndPassword,
+  signOut,
+} from "firebase/auth";
 import { getDatabase, connectDatabaseEmulator } from "firebase/database";
 import { getStorage, connectStorageEmulator } from "firebase/storage";
 
@@ -87,3 +92,22 @@ if (isFirebaseConfigured && USE_EMULATOR) {
 }
 
 export { app, auth, db, storage };
+
+// Create a sign-in for a staff member (feature "staffAccounts"). Creating a user normally signs
+// the browser in AS that user; doing it on a second, throw-away app instance leaves the owner's
+// own session untouched. Resolves with the new account's uid.
+let staffApp = null;
+export async function createStaffLogin(email, password) {
+  if (!app) throw new Error("Firebase is not configured");
+  if (!staffApp) {
+    staffApp = initializeApp(app.options, "staff-admin");
+    if (USE_EMULATOR)
+      connectAuthEmulator(getAuth(staffApp), `http://${EMULATOR_HOST}:${EMULATOR_PORTS.auth}`, {
+        disableWarnings: true,
+      });
+  }
+  const a = getAuth(staffApp);
+  const cred = await createUserWithEmailAndPassword(a, email, password);
+  await signOut(a);
+  return cred.user.uid;
+}

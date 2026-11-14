@@ -1,4 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { RoleContext, STAFF_TABS, STAFF_SLICES, roleFrom } from "./config/role.js";
+import { featureOn, tabEnabled } from "./config/features.js";
+import { unnumbered, fyLabel } from "./lib/billNumbers.js";
 import { useLang, LangSelect } from "./i18n/index.jsx";
 import { useDebouncedValue } from "./ui/hooks.js";
 import { syncSummary, syncText } from "./lib/syncStatus.js";
@@ -27,6 +30,7 @@ import {
   recordSaleOp,
   amendSaleOp,
   voidSaleOp,
+  returnSaleOp,
 } from "./lib/ops.js";
 import { openLocalDb, createCacheWriter } from "./lib/localdb.js";
 import { createOutbox } from "./lib/outbox.js";
@@ -50,7 +54,11 @@ import {
   subscribeUdhariSales,
   fetchSalesRange,
   fetchAllSales,
+  allocateBillNumber,
+  subscribeMeta,
+  readOwnUser,
 } from "./lib/sync.js";
+import { backupStatus } from "./lib/backupReminder.js";
 import {
   SALES_WINDOW_MONTHS,
   windowStart,
@@ -85,6 +93,9 @@ const DailyBills = lazyScreen(() => import("./screens/DailyBills.jsx"), "DailyBi
 const Logs = lazyScreen(() => import("./screens/Logs.jsx"), "Logs");
 const Settings = lazyScreen(() => import("./screens/Settings.jsx"), "Settings");
 const Admin = lazyScreen(() => import("./screens/Admin.jsx"), "Admin");
+const DayClose = lazyScreen(() => import("./screens/DayClose.jsx"), "DayClose");
+const Customers = lazyScreen(() => import("./screens/Customers.jsx"), "Customers");
+const Restock = lazyScreen(() => import("./screens/Restock.jsx"), "Restock");
 
 // ---------- root: Firebase auth gate ----------
 export default function App() {
@@ -105,19 +116,59 @@ export default function App() {
     );
   }
   if (!user) return <Login />;
-  return <StoreManager user={user} onLogout={() => signOut(auth)} />;
+  return <RoleGate user={user} onLogout={() => signOut(auth)} />;
+}
+
+// With feature "staffAccounts" on, find out who this is before showing anything: the owner,
+// a staff member, or someone with a login but no place in this shop. With it off, everyone is
+// the owner — exactly as before.
+function RoleGate({ user, onLogout }) {
+  const on = featureOn("staffAccounts");
+  const [role, setRole] = useState(on ? null : "owner");
+  useEffect(() => {
+    if (!on) return;
+    let dead = false;
+    setRole(null);
+    readOwnUser(user.uid).then((r) => {
+      if (!dead) setRole(roleFrom(r));
+    });
+    return () => {
+      dead = true;
+    };
+  }, [on, user.uid]);
+  if (role === null)
+    return (
+      <div style={{ minHeight: "100vh", background: "#F3F6F3", padding: 24 }}>
+        <style>{CSS}</style>
+        <div style={{ maxWidth: 900, margin: "0 auto" }}>
+          <PageSkeleton label="Loading…" />
+        </div>
+      </div>
+    );
+  if (role === "none")
+    return (
+      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 20 }}>
+        <style>{CSS}</style>
+        <div style={{ maxWidth: 420, textAlign: "center" }}>
+          <h1 style={{ fontSize: 20 }}>No access to this shop</h1>
+          <p style={{ color: "#445", lineHeight: 1.5 }}>
+            {user.email} is signed in, but the shop owner has not added this account as staff.
+          </p>
+          <button className="btn primary big" onClick={onLogout}>
+            Sign out
+          </button>
+        </div>
+      </div>
+    );
+  return (
+    <RoleContext.Provider value={role}>
+      <StoreManager user={user} onLogout={onLogout} role={role} />
+    </RoleContext.Provider>
+  );
 }
 
 // ---------- main app ----------
-// Feature flags for deprecating a section from the live UI WITHOUT deleting its
-// code. A tab listed here as `false` is dropped from the sidebar and its render
-// branch is skipped; the component and all its logic stay intact below. To bring
-// a section back, flip its flag to `true` (or remove the line).
-const FEATURES = {
-  finance: false, // deprecated 2026 — kept for a possible future revival
-};
-// A tab is shown unless a flag explicitly turns it off.
-const tabEnabled = (k) => FEATURES[k] !== false;
+// Feature flags live in src/config/features.js.
 
 // Top-level sidebar destinations, plus the secondary group tucked under "Other".
 // Both feed the same `tab` switch below — grouping is purely a nav-rendering concern.
@@ -131,6 +182,10 @@ const TOP_TABS = [
   ["udhari", "💳", "Udhari (Credit)"],
   ["expense", "⊝", "Add Expense"],
   ["dailybills", "🧺", "Supplier Bills"],
+  // Phase 4 tabs — hidden until their flag in config/features.js is on.
+  ["dayClose", "🧮", "Day Close"],
+  ["customerLedger", "👥", "Customers"],
+  ["restockSuggestions", "📦", "Restock"],
 ];
 const OTHER_TABS = [
   ["alerts", "⚠", "Alerts"],
@@ -176,9 +231,19 @@ const slugify = (s) =>
 // voidSaleOp → lib/sync.js sendOp), so the bill and its stock change are retried and replayed
 // together and a replay can never apply the stock change twice.
 
-function StoreManager({ user, onLogout }) {
+function StoreManager({ user, onLogout, role = "owner" }) {
   const { t } = useLang();
-  const [tab, setTab] = useState("dashboard");
+  const isStaff = role === "staff";
+  // Staff start on Billing and only ever see the staff tabs.
+  const [tab, setTabRaw] = useState(isStaff ? "billing" : "dashboard");
+  const tabAllowed = useCallback(
+    (k) => tabEnabled(k) && (!isStaff || STAFF_TABS.includes(k)),
+    [isStaff]
+  );
+  const setTab = useCallback(
+    (k) => setTabRaw(tabAllowed(k) ? k : isStaff ? "billing" : "dashboard"),
+    [tabAllowed, isStaff]
+  );
   const [otherOpen, setOtherOpen] = useState(false);
   // `rawItems` = products exactly as last received from the cloud (or the local cache).
   // `items` (below) = what every screen sees: rawItems + stock changes still in the outbox.
@@ -493,7 +558,9 @@ function StoreManager({ user, onLogout }) {
         salesEmit.current = null;
       };
     };
-    const unsubs = slices.map(([slice, setter]) => {
+    // A staff account subscribes only to what the rules let it read.
+    const mine = isStaff ? slices.filter(([slice]) => STAFF_SLICES.includes(slice)) : slices;
+    const unsubs = mine.map(([slice, setter]) => {
       const handle = makeHandler(slice, setter);
       if (slice === "sales" && WINDOW_FROM) return subscribeWindowedSales(handle);
       return subscribeSlice(slice, (v) => handle(v, false), onErr(slice));
@@ -506,7 +573,7 @@ function StoreManager({ user, onLogout }) {
       unsubs.forEach((u) => u());
       unsubConn();
     };
-  }, [loaded, WINDOW_FROM, setSalesFrom]);
+  }, [loaded, WINDOW_FROM, setSalesFrom, isStaff]);
 
   // Fetch older bills once (not live) and add them to what is loaded. `from` = the earliest
   // date wanted (rounded down to its month start); null = everything. Resolves true when the
@@ -656,6 +723,87 @@ function StoreManager({ user, onLogout }) {
     [commitSaleOp]
   );
 
+  // Bill numbers (feature "billNumbers"): every bill carrying a provisional number gets its
+  // real, sequential one as soon as this device is online — one at a time, oldest first, so
+  // the numbers follow the order the bills were made. Allocation is an idempotent cloud
+  // transaction; the number is then written onto the bill like any other edit (outbox).
+  const numbering = useRef(false);
+  useEffect(() => {
+    if (!featureOn("billNumbers") || !loaded || !online || numbering.current) return;
+    const next = unnumbered(sales)[0];
+    if (!next) return;
+    numbering.current = true;
+    allocateBillNumber(fyLabel(next.date), next.id)
+      .then((billNo) => {
+        setSales((all) =>
+          all.map((x) => {
+            if (x.id !== next.id || x.billNo) return x;
+            const numbered = { ...x, billNo };
+            delete numbered.billNoProv;
+            return numbered;
+          })
+        );
+      })
+      .catch((e) => console.error("bill number allocation failed", e))
+      .finally(() => {
+        numbering.current = false;
+      });
+  }, [sales, loaded, online]);
+
+  // Returns & exchange (feature "returns"): the return bill, the "returned" marks on the
+  // original and the restock are ONE outbox op.
+  const returnSale = useCallback(
+    (orig, ret, newLines) => {
+      const parts = returnSaleOp(orig, ret, newLines);
+      commitSaleOp(parts, "sale-return");
+      const saved = parts.patch["sales/" + ret.id];
+      const lines = parts.patch[`sales/${orig.id}/lines`];
+      setSales((all) => [
+        ...all.filter((x) => x.id !== ret.id).map((x) => (x.id === orig.id ? { ...x, lines } : x)),
+        saved,
+      ]);
+    },
+    [commitSaleOp]
+  );
+  // Credit from an exchange that has not been spent on a new bill yet. Kept on this device.
+  const [exchangeCredit, setExchangeCreditState] = useState(() => {
+    try {
+      const c = JSON.parse(localStorage.getItem("cfs-exchange-credit-v1") || "null");
+      return c && c.amount > 0 ? c : null;
+    } catch {
+      return null;
+    }
+  });
+  const setExchangeCredit = useCallback((c) => {
+    const next = c && c.amount > 0 ? c : null;
+    setExchangeCreditState(next);
+    try {
+      if (next) localStorage.setItem("cfs-exchange-credit-v1", JSON.stringify(next));
+      else localStorage.removeItem("cfs-exchange-credit-v1");
+    } catch (e) {
+      console.error("exchange credit write failed", e);
+    }
+  }, []);
+
+  // Day close (feature "dayClose"): one record per day, written through the outbox.
+  const saveDayClose = useCallback((date, rec) => {
+    outboxRef.current?.enqueue({
+      id: uid(),
+      patch: { ["dayCloses/" + date]: rec },
+      label: "dayclose",
+    });
+  }, []);
+
+  // Backup reminder (feature "backupReminder"): when the shop was last backed up, shared by
+  // every device (shop/meta/lastBackupAt).
+  const [lastBackupAt, setLastBackupAt] = useState(null);
+  useEffect(() => {
+    if (!featureOn("backupReminder") || !loaded) return;
+    return subscribeMeta("lastBackupAt", (v) => setLastBackupAt(Number(v) || 0));
+  }, [loaded]);
+  const backup =
+    featureOn("backupReminder") && lastBackupAt !== null ? backupStatus(lastBackupAt) : null;
+
   // 4) Mirror to the device cache (instant next paint + offline reads). IndexedDB, one entry
   //    per record, only changed records are written — so there is no size ceiling and a single
   //    new bill costs a single small write. Nothing here is needed for durability of unsynced
@@ -729,9 +877,9 @@ function StoreManager({ user, onLogout }) {
       pushedCats.current.add(k);
       patch[CUSTOM_SUBCATS_PATH + "/" + subcatKey(c)] = c;
     }
-    if (Object.keys(patch).length)
+    if (Object.keys(patch).length && !isStaff)
       outboxRef.current?.enqueue({ id: uid(), patch, label: "subcategories" });
-  }, [cloudCats, customCats]);
+  }, [cloudCats, customCats, isStaff]);
 
   // Prompt for and add a new subcategory. Returns the canonical name to select (existing match if
   // it's a duplicate, the new name otherwise), or null if cancelled/blank. Used by the Add/Edit forms.
@@ -833,6 +981,8 @@ function StoreManager({ user, onLogout }) {
       if (fmt === "xlsx") await exportXlsx(data, fname);
       else exportJson(data, fname);
       addLog("backup", `Backup downloaded (${fmt.toUpperCase()})${partial ? " — PARTIAL" : ""}`);
+      if (featureOn("backupReminder") && !partial)
+        writeMeta("lastBackupAt", Date.now()).catch((e) => console.error("backup stamp", e));
       notify(
         partial
           ? `⚠ Offline — this backup only has bills since ${partial}. Export again when online.`
@@ -924,7 +1074,7 @@ function StoreManager({ user, onLogout }) {
               </div>
             </div>
           </div>
-          {TOP_TABS.filter(([k]) => tabEnabled(k)).map(([k, ic, label]) => (
+          {TOP_TABS.filter(([k]) => tabAllowed(k)).map(([k, ic, label]) => (
             <button
               key={k}
               className={"navbtn" + (tab === k ? " active" : "")}
@@ -952,7 +1102,7 @@ function StoreManager({ user, onLogout }) {
             {!showOther && alertCount > 0 && <span style={S.badge}>{alertCount}</span>}
           </button>
           {showOther &&
-            OTHER_TABS.filter(([k]) => tabEnabled(k)).map(([k, ic, label]) => (
+            OTHER_TABS.filter(([k]) => tabAllowed(k)).map(([k, ic, label]) => (
               <button
                 key={k}
                 className={"navbtn sub" + (tab === k ? " active" : "")}
@@ -965,7 +1115,13 @@ function StoreManager({ user, onLogout }) {
                 {k === "alerts" && alertCount > 0 && <span style={S.badge}>{alertCount}</span>}
               </button>
             ))}
-          <div style={{ marginTop: "auto", padding: "8px 8px 4px" }}>
+          <div
+            style={{
+              marginTop: "auto",
+              padding: "8px 8px 4px",
+              display: isStaff ? "none" : undefined,
+            }}
+          >
             <div
               style={{
                 fontSize: 10.5,
@@ -1053,10 +1209,11 @@ function StoreManager({ user, onLogout }) {
             {user?.email ? (
               <>
                 {t("Signed in as {email}.", { email: user.email })}
+                {isStaff ? " (staff)" : ""}
                 <br />
               </>
             ) : null}
-            {t("Back up regularly.")}
+            {!isStaff && t("Back up regularly.")}
             <LangSelect
               style={{
                 marginTop: 8,
@@ -1074,7 +1231,7 @@ function StoreManager({ user, onLogout }) {
           <Suspense fallback={<PageSkeleton />}>
             {!loaded ? (
               <PageSkeleton label={t("Loading store data…")} />
-            ) : tab === "dashboard" ? (
+            ) : tab === "dashboard" && !isStaff ? (
               <Dashboard
                 items={items}
                 sales={sales}
@@ -1083,6 +1240,8 @@ function StoreManager({ user, onLogout }) {
                 salesFrom={salesFrom}
                 olderMonthly={olderMonthly}
                 loadOlderSales={loadOlderSales}
+                backup={backup}
+                onBackup={() => exportData("json")}
               />
             ) : tab === "billing" ? (
               <Billing
@@ -1093,6 +1252,8 @@ function StoreManager({ user, onLogout }) {
                 goInventory={() => setTab("inventory")}
                 notify={notify}
                 log={addLog}
+                exchangeCredit={exchangeCredit}
+                setExchangeCredit={setExchangeCredit}
               />
             ) : tab === "raw" ? (
               <RawData
@@ -1125,6 +1286,8 @@ function StoreManager({ user, onLogout }) {
                 loadOlderSales={loadOlderSales}
                 notify={notify}
                 log={addLog}
+                returnSale={returnSale}
+                setExchangeCredit={setExchangeCredit}
               />
             ) : tab === "finance" && tabEnabled("finance") ? (
               <AllSalesGate salesFrom={salesFrom} loadOlderSales={loadOlderSales} allowPartial>
@@ -1169,6 +1332,22 @@ function StoreManager({ user, onLogout }) {
                 notify={notify}
                 log={addLog}
               />
+            ) : tab === "dayClose" && tabEnabled("dayClose") ? (
+              <DayClose
+                sales={sales}
+                expenses={expenses}
+                salesFrom={salesFrom}
+                loadOlderSales={loadOlderSales}
+                saveDayClose={saveDayClose}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "customerLedger" && tabEnabled("customerLedger") ? (
+              <AllSalesGate salesFrom={salesFrom} loadOlderSales={loadOlderSales} allowPartial>
+                <Customers sales={sales} goBilling={() => setTab("billing")} />
+              </AllSalesGate>
+            ) : tab === "restockSuggestions" && tabEnabled("restockSuggestions") ? (
+              <Restock items={items} sales={sales} goInventory={() => setTab("inventory")} />
             ) : tab === "logs" ? (
               <Logs
                 logs={logs}

@@ -9,6 +9,11 @@ import {
 } from "../lib/catalog.js";
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, useRef, memo } from "react";
+import { useIsStaff } from "../config/role.js";
+import { labelsHtml } from "../lib/barcode.js";
+import { printHtml } from "../lib/print.js";
+import { featureOn } from "../config/features.js";
+import { GST_RATES } from "../lib/gst.js";
 import { confirmDialog, alertDialog } from "../ui/dialogs.jsx";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { normName, iconFor } from "../lib/domain.js";
@@ -30,7 +35,7 @@ import { INR } from "../lib/format.js";
 
 // One product card. Memoised: while the owner types in the search box (or a toast appears) the
 // cards whose product object has not changed are not re-rendered.
-const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) {
+const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete, onLabels, staff }) {
   const st = productStock(i);
   const low = isProductLow(i);
   return (
@@ -90,15 +95,24 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) 
               flexWrap: "wrap",
             }}
           >
-            <button className="btn small" onClick={() => onRestock(i)}>
-              Restock
-            </button>
-            <button className="btn small" onClick={() => onEdit(i)}>
-              Edit
-            </button>
-            <button className="btn small ghost" onClick={() => onDelete(i)}>
-              Delete
-            </button>
+            {onLabels && (
+              <button className="btn small" onClick={() => onLabels(i)}>
+                🏷 Labels
+              </button>
+            )}
+            {!staff && (
+              <>
+                <button className="btn small" onClick={() => onRestock(i)}>
+                  Restock
+                </button>
+                <button className="btn small" onClick={() => onEdit(i)}>
+                  Edit
+                </button>
+                <button className="btn small ghost" onClick={() => onDelete(i)}>
+                  Delete
+                </button>
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -107,6 +121,7 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) 
 });
 
 export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddCategory }) {
+  const staff = useIsStaff(); // staff look up stock; they do not change the catalogue
   const config = useShopConfig();
   const [q, setQ] = useState("");
   const [group, setGroup] = useState("All"); // All | Clothing | Footwear | Accessories
@@ -197,6 +212,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
 
   const onEdit = useStableCallback((p) => setForm(toFormShape(p)));
   const onDelete = useStableCallback(del);
+  // Feature "barcode": print a size / price label with a barcode for every variant.
+  const printLabels = useStableCallback((p) =>
+    printHtml(labelsHtml(p, { money: INR, shop: config.name }), "Labels — " + p.name)
+  );
+  const onLabels = featureOn("barcode") ? printLabels : null;
 
   const doRestock = async (product, variantId, qty) => {
     const n = Number(qty) || 0;
@@ -217,9 +237,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         title="Inventory"
         sub={`${items.length} product${items.length === 1 ? "" : "s"} · tap a product to edit its variants`}
       >
-        <button className="btn primary" onClick={() => setForm(blankProduct())}>
-          + Add product
-        </button>
+        {!staff && (
+          <button className="btn primary" onClick={() => setForm(blankProduct())}>
+            + Add product
+          </button>
+        )}
       </Header>
 
       <div
@@ -278,9 +300,11 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
 
       {filtered.length === 0 ? (
         <Empty text={items.length === 0 ? "No products yet." : "No products match this filter."}>
-          <button className="btn primary" onClick={() => setForm(blankProduct())}>
-            + Add your first product
-          </button>
+          {!staff && (
+            <button className="btn primary" onClick={() => setForm(blankProduct())}>
+              + Add your first product
+            </button>
+          )}
         </Empty>
       ) : (
         <div style={{ display: "grid", gap: 10 }}>
@@ -291,6 +315,8 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
               onRestock={setRestock}
               onEdit={onEdit}
               onDelete={onDelete}
+              onLabels={onLabels}
+              staff={staff}
             />
           ))}
           {filtered.length > limit && (
@@ -338,6 +364,9 @@ export function toFormShape(p) {
     variants: (p.variants || []).map((v) => ({ ...v })),
     createdAt: p.createdAt,
     version: p.version,
+    // Optional fields ride along even when their feature is off, so an edit never drops them.
+    ...(p.hsn ? { hsn: p.hsn } : {}),
+    ...(p.gstRate ? { gstRate: p.gstRate } : {}),
   };
 }
 
@@ -486,6 +515,9 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
       supplier: (f.supplier || "").trim(),
       imageUrl: (f.imageUrl || "").trim(),
       notes: (f.notes || "").trim(),
+      ...(featureOn("gstInvoice")
+        ? { hsn: (f.hsn || "").trim(), gstRate: Number(f.gstRate) || 0 }
+        : {}),
       variants: variants.map((v) => ({
         id: v.id,
         size: String(v.size || "").trim(),
@@ -612,6 +644,28 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
             placeholder="0"
           />
         </Field>
+        {featureOn("gstInvoice") && (
+          <>
+            <Field label="HSN code">
+              <input
+                className="input"
+                inputMode="numeric"
+                value={f.hsn || ""}
+                onChange={set("hsn")}
+                placeholder="e.g. 6204"
+              />
+            </Field>
+            <Field label="GST rate (price includes GST)">
+              <select className="input" value={String(f.gstRate || 0)} onChange={set("gstRate")}>
+                {GST_RATES.map((r) => (
+                  <option key={r} value={r}>
+                    {r === 0 ? "No GST / exempt" : r + "%"}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </>
+        )}
         <Field label="Supplier">
           <input
             className="input"

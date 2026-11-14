@@ -27,6 +27,7 @@ import {
 } from "firebase/database";
 import { db } from "../config/firebase.js";
 import { applyStockOp, stockByProduct } from "./ops.js";
+import { allocateInCounter, formatBillNo } from "./billNumbers.js";
 
 export const SLICES = ["items", "sales", "expenses", "logs", "vendorBills", "dailyBills"];
 
@@ -226,3 +227,54 @@ export const subscribeUdhariSales = (onData, onError) =>
 export const fetchSalesRange = (from, to) =>
   get(query(salesRef(), orderByChild("date"), startAt(from), endAt(to))).then((s) => s.val());
 export const fetchAllSales = () => get(salesRef()).then((s) => s.val());
+
+// Hand out the next bill number of a financial year (see billNumbers.js). Resolves with the
+// formatted number, e.g. "2026-27/0007". Needs a connection — the caller only asks while online.
+export async function allocateBillNumber(fy, saleId) {
+  let n = null;
+  await runTransaction(ref(db, "shop/meta/billCounters/" + fy), (node) => {
+    const r = allocateInCounter(node, String(saleId));
+    n = r.n;
+    return r.node;
+  });
+  return formatBillNo(fy, n);
+}
+
+// Day close records (feature "dayClose"): shop/dayCloses/<YYYY-MM-DD>. Written through the
+// outbox as a normal patch; read live here.
+export const subscribeDayClose = (date, onData) =>
+  onValue(
+    ref(db, "shop/dayCloses/" + date),
+    (s) => onData(s.val()),
+    () => onData(null)
+  );
+// A single value under shop/meta, live.
+export const subscribeMeta = (key, onData) =>
+  onValue(
+    ref(db, "shop/meta/" + key),
+    (s) => onData(s.val()),
+    () => {}
+  );
+
+// Roles (feature "staffAccounts"): shop/users/<uid> = { role, email, addedAt }.
+// → { value } for a listed account, { value: null, owner: true } for the owner (no entry of
+// their own, but allowed to read the shop), { denied: true } for anyone else. Every account
+// may read its OWN entry, so a missing entry alone does not mean "owner" — the second read
+// (something only the owner or staff can see) settles it.
+export async function readOwnUser(uid) {
+  try {
+    const own = (await get(ref(db, "shop/users/" + uid))).val();
+    if (own) return { value: own };
+    await get(ref(db, "shop/meta/seeded"));
+    return { value: null, owner: true };
+  } catch {
+    return { denied: true };
+  }
+}
+export const subscribeUsers = (onData) =>
+  onValue(
+    ref(db, "shop/users"),
+    (s) => onData(s.val() || {}),
+    () => onData({})
+  );
+export const setUser = (uid, value) => set(ref(db, "shop/users/" + uid), value);
