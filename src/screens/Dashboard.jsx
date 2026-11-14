@@ -32,6 +32,8 @@ export function Dashboard({
   salesFrom = null,
   olderMonthly,
   loadOlderSales,
+  backup = null,
+  onBackup,
 }) {
   const [date, setDate] = useState(todayStr());
   const isToday = date === todayStr();
@@ -82,6 +84,33 @@ export function Dashboard({
           />
         </label>
       </Header>
+      {backup && (
+        <section
+          role="status"
+          style={{
+            ...S.panel,
+            marginBottom: 14,
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            flexWrap: "wrap",
+            borderColor: backup.due ? "#E3B34A" : "#E2EAE3",
+            background: backup.due ? "#FFF8E6" : "#fff",
+          }}
+        >
+          <span style={{ fontWeight: 700 }}>
+            💾 {backup.text}
+            {backup.due && " — weekly backup is due"}
+          </span>
+          <button
+            className={"btn" + (backup.due ? " primary" : "")}
+            style={{ marginLeft: "auto" }}
+            onClick={onBackup}
+          >
+            Back up now
+          </button>
+        </section>
+      )}
       <div style={S.cards}>
         <Card
           label={isToday ? "Today's sales" : "Sales (this day)"}

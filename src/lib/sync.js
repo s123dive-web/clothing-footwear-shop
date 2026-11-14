@@ -239,3 +239,19 @@ export async function allocateBillNumber(fy, saleId) {
   });
   return formatBillNo(fy, n);
 }
+
+// Day close records (feature "dayClose"): shop/dayCloses/<YYYY-MM-DD>. Written through the
+// outbox as a normal patch; read live here.
+export const subscribeDayClose = (date, onData) =>
+  onValue(
+    ref(db, "shop/dayCloses/" + date),
+    (s) => onData(s.val()),
+    () => onData(null)
+  );
+// A single value under shop/meta, live.
+export const subscribeMeta = (key, onData) =>
+  onValue(
+    ref(db, "shop/meta/" + key),
+    (s) => onData(s.val()),
+    () => {}
+  );

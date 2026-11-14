@@ -40,4 +40,4 @@ export function featureOn(name) {
 }
 
 // A tab is shown unless a flag explicitly turns it off.
-export const tabEnabled = (key) => FEATURES[key] !== false || featureOn(key);
+export const tabEnabled = (key) => !(key in FEATURES) || featureOn(key);

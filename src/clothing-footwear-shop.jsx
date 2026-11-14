@@ -53,7 +53,9 @@ import {
   fetchSalesRange,
   fetchAllSales,
   allocateBillNumber,
+  subscribeMeta,
 } from "./lib/sync.js";
+import { backupStatus } from "./lib/backupReminder.js";
 import {
   SALES_WINDOW_MONTHS,
   windowStart,
@@ -88,6 +90,9 @@ const DailyBills = lazyScreen(() => import("./screens/DailyBills.jsx"), "DailyBi
 const Logs = lazyScreen(() => import("./screens/Logs.jsx"), "Logs");
 const Settings = lazyScreen(() => import("./screens/Settings.jsx"), "Settings");
 const Admin = lazyScreen(() => import("./screens/Admin.jsx"), "Admin");
+const DayClose = lazyScreen(() => import("./screens/DayClose.jsx"), "DayClose");
+const Customers = lazyScreen(() => import("./screens/Customers.jsx"), "Customers");
+const Restock = lazyScreen(() => import("./screens/Restock.jsx"), "Restock");
 
 // ---------- root: Firebase auth gate ----------
 export default function App() {
@@ -126,6 +131,10 @@ const TOP_TABS = [
   ["udhari", "💳", "Udhari (Credit)"],
   ["expense", "⊝", "Add Expense"],
   ["dailybills", "🧺", "Supplier Bills"],
+  // Phase 4 tabs — hidden until their flag in config/features.js is on.
+  ["dayClose", "🧮", "Day Close"],
+  ["customerLedger", "👥", "Customers"],
+  ["restockSuggestions", "📦", "Restock"],
 ];
 const OTHER_TABS = [
   ["alerts", "⚠", "Alerts"],
@@ -678,6 +687,25 @@ function StoreManager({ user, onLogout }) {
       });
   }, [sales, loaded, online]);
 
+  // Day close (feature "dayClose"): one record per day, written through the outbox.
+  const saveDayClose = useCallback((date, rec) => {
+    outboxRef.current?.enqueue({
+      id: uid(),
+      patch: { ["dayCloses/" + date]: rec },
+      label: "dayclose",
+    });
+  }, []);
+
+  // Backup reminder (feature "backupReminder"): when the shop was last backed up, shared by
+  // every device (shop/meta/lastBackupAt).
+  const [lastBackupAt, setLastBackupAt] = useState(null);
+  useEffect(() => {
+    if (!featureOn("backupReminder") || !loaded) return;
+    return subscribeMeta("lastBackupAt", (v) => setLastBackupAt(Number(v) || 0));
+  }, [loaded]);
+  const backup =
+    featureOn("backupReminder") && lastBackupAt !== null ? backupStatus(lastBackupAt) : null;
+
   // 4) Mirror to the device cache (instant next paint + offline reads). IndexedDB, one entry
   //    per record, only changed records are written — so there is no size ceiling and a single
   //    new bill costs a single small write. Nothing here is needed for durability of unsynced
@@ -855,6 +883,8 @@ function StoreManager({ user, onLogout }) {
       if (fmt === "xlsx") await exportXlsx(data, fname);
       else exportJson(data, fname);
       addLog("backup", `Backup downloaded (${fmt.toUpperCase()})${partial ? " — PARTIAL" : ""}`);
+      if (featureOn("backupReminder") && !partial)
+        writeMeta("lastBackupAt", Date.now()).catch((e) => console.error("backup stamp", e));
       notify(
         partial
           ? `⚠ Offline — this backup only has bills since ${partial}. Export again when online.`
@@ -1105,6 +1135,8 @@ function StoreManager({ user, onLogout }) {
                 salesFrom={salesFrom}
                 olderMonthly={olderMonthly}
                 loadOlderSales={loadOlderSales}
+                backup={backup}
+                onBackup={() => exportData("json")}
               />
             ) : tab === "billing" ? (
               <Billing
@@ -1191,6 +1223,22 @@ function StoreManager({ user, onLogout }) {
                 notify={notify}
                 log={addLog}
               />
+            ) : tab === "dayClose" && tabEnabled("dayClose") ? (
+              <DayClose
+                sales={sales}
+                expenses={expenses}
+                salesFrom={salesFrom}
+                loadOlderSales={loadOlderSales}
+                saveDayClose={saveDayClose}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "customerLedger" && tabEnabled("customerLedger") ? (
+              <AllSalesGate salesFrom={salesFrom} loadOlderSales={loadOlderSales} allowPartial>
+                <Customers sales={sales} goBilling={() => setTab("billing")} />
+              </AllSalesGate>
+            ) : tab === "restockSuggestions" && tabEnabled("restockSuggestions") ? (
+              <Restock items={items} sales={sales} goInventory={() => setTab("inventory")} />
             ) : tab === "logs" ? (
               <Logs
                 logs={logs}

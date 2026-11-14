@@ -12,6 +12,7 @@ import {
   records,
   eventually,
   dbGet,
+  dbPut,
   enableFeatures,
   receiptHtml,
   blockDatabase,
@@ -188,4 +189,109 @@ test("whatsappReceipt: a wa.me link with the plain-text bill", async ({ page }) 
     "href",
     /^https:\/\/wa\.me\/919876543210\?text=/
   );
+});
+
+test("dayClose: totals by payment mode, expected vs counted cash, saved and summarised", async ({
+  page,
+}) => {
+  await enableFeatures(page, ["dayClose"]);
+  await dbPut("shop/expenses/x1", { id: "x1", date: todayStr(), desc: "Tea", amount: 50 });
+  await shopWithProduct(page);
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
+  await sell(page, "M · Red", 2); // ₹1,000 cash
+  await page.getByRole("button", { name: "UPI", exact: true }).click();
+  await sell(page, "L · Red", 1); // ₹500 UPI
+  await page.getByRole("button", { name: "Udhari", exact: true }).click();
+  await page.getByLabel("Customer name").fill("Credit Lady");
+  await page.getByLabel("Amount paid now").fill("200");
+  await sell(page, "L · Red", 1); // ₹500 credit, ₹200 cash now
+
+  await gotoTab(page, "Day Close");
+  await expect(page.getByRole("heading", { level: 1, name: "Day Close" })).toBeVisible();
+  const main = page.locator("main");
+  await expect(main).toContainText("Cash received₹1,200"); // 1,000 + 200
+  await expect(main).toContainText("UPI received₹500");
+  await expect(main).toContainText("Udhari given₹500");
+  await page.getByLabel("Opening cash (float)").fill("300");
+  // expected = 300 + 1,200 − 50 expenses
+  await expect(main).toContainText("Expected in drawer₹1,450");
+  await page.getByLabel("Cash counted").fill("1400");
+  await expect(page.getByRole("status").filter({ hasText: "Short by ₹50" })).toBeVisible();
+  await page.getByRole("button", { name: "Close the day" }).click();
+  await expect(page.getByText(/Day closed — short by ₹50/)).toBeVisible();
+  await eventually(async () =>
+    expect(await dbGet("shop/dayCloses/" + todayStr())).toMatchObject({
+      date: todayStr(),
+      opening: 300,
+      expected: 1450,
+      counted: 1400,
+      diff: -50,
+    })
+  );
+  await expect(page.getByLabel("Daily summary text")).toContainText("Short by ₹50");
+  await expect(page.getByRole("link", { name: /Send on WhatsApp/ })).toHaveAttribute(
+    "href",
+    /^https:\/\/wa\.me\/\?text=/
+  );
+  // A second device opening the same day sees the saved close.
+  await page.reload();
+  await gotoTab(page, "Day Close");
+  await expect(page.getByLabel("Cash counted")).toHaveValue("1400");
+  await expect(page.getByRole("button", { name: "Update day close" })).toBeVisible();
+});
+
+test("backupReminder: Dashboard says when the last backup was and offers one", async ({ page }) => {
+  await enableFeatures(page, ["backupReminder"]);
+  await dbPut("shop/meta/lastBackupAt", Date.now() - 9 * 86400000);
+  await login(page);
+  await expect(page.getByText(/Last backup: 9 days ago — weekly backup is due/)).toBeVisible();
+  const dl = page.waitForEvent("download");
+  await page.getByRole("button", { name: "Back up now" }).click();
+  await dl;
+  await expect(page.getByText("💾 Last backup: today")).toBeVisible();
+  expect(Date.now() - (await dbGet("shop/meta/lastBackupAt"))).toBeLessThan(60000);
+});
+
+test("customerLedger: purchases, outstanding and a WhatsApp reminder per customer", async ({
+  page,
+}) => {
+  await enableFeatures(page, ["customerLedger"]);
+  await shopWithProduct(page);
+  await page.getByRole("button", { name: "Udhari", exact: true }).click();
+  await page.getByLabel("Customer name").fill("Meena Tai");
+  await page.getByLabel("Mobile").fill("9876543210");
+  await page.getByLabel("Amount paid now").fill("100");
+  await sell(page, "M · Red", 2); // ₹1,000, ₹900 due
+  // (in Udhari mode there are two "Cash" buttons — the first is the payment mode)
+  await page.getByRole("button", { name: "Cash", exact: true }).first().click();
+  await page.getByLabel("Customer name").fill("meena tai");
+  await sell(page, "L · Red", 1); // ₹500 cash, same customer (different capitalisation)
+
+  await gotoTab(page, "Customers");
+  const main = page.locator("main");
+  await expect(main).toContainText("Outstanding₹900");
+  const row = page.getByRole("button", { name: /meena tai/i });
+  await expect(row).toContainText("2 bills");
+  await expect(row).toContainText("₹1,500");
+  await expect(row).toContainText("₹900 due");
+  await row.click();
+  const link = page.getByRole("link", { name: /Send payment reminder/ });
+  const href = await link.getAttribute("href");
+  expect(href.startsWith("https://wa.me/919876543210?text=")).toBe(true);
+  expect(decodeURIComponent(href)).toContain("outstanding balance is *₹900*");
+});
+
+test("restockSuggestions: sell-through, days of stock left and a suggested order", async ({
+  page,
+}) => {
+  await enableFeatures(page, ["restockSuggestions"]);
+  await shopWithProduct(page);
+  await sell(page, "M · Red", 6); // 9 → 3 left; 6 sold in 30 days = 0.2/day → 15 days left
+  await gotoTab(page, "Restock");
+  const row = page.getByRole("row", { name: /Feature Kurti.*M · Red/ });
+  await expect(row).toContainText("fast");
+  const cells = await row.getByRole("cell").allInnerTexts();
+  expect(cells.slice(2)).toEqual(["3", "6", "0.2", "15", "+3"]); // stock, sold, /day, days, order
+  await expect(page.getByText("M · 6 sold")).toBeVisible();
+  await expect(page.getByRole("row", { name: /L · Red/ })).toHaveCount(0); // healthy, unsold
 });
