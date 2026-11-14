@@ -49,21 +49,54 @@ counter, mostly on a phone, with real sales data.** Read the hard rules before c
 - **`src/config/`** — `firebase.js` (live config + emulator switch), `shopConfig.js`,
   `currency.js`.
 
-### How sync works today (Phase 0 baseline — Phase 1 changes this)
+### How sync works (since Phase 1)
 
-- On mount: paint from the `cfs-cache-v1` localStorage cache, then subscribe (`onValue`) to each
-  slice under `shop/<slice>`.
-- **sales / expenses / logs / vendorBills / dailyBills**: React state is the source; a 300 ms
-  debounced effect diffs state against the last cloud snapshot (`buildSliceUpdate`) and sends a
-  field-level multi-path `update`. Incoming snapshots are 3-way merged (`mergeRemote`) — except
-  the **first** snapshot after load, which simply replaces local state.
-- **items**: never delta-pushed. Every product write is a `runTransaction` on
-  `shop/items/<id>` (`cloudWriteProduct`, `cloudSellCart`, `cloudRestockVariant`,
-  `cloudAdjustVariant`, `cloudDeleteProduct`); local state updates from the listener echo.
-- A sale is therefore **two independent writes**: the bill (debounced slice push) and the stock
-  decrement (immediate transaction per product).
-- The whole dataset is mirrored to one localStorage key 400 ms after any change and on
-  `pagehide` / `beforeunload` / `visibilitychange`.
+Three device-side pieces, all in `src/lib/`:
+
+- **`localdb.js`** — IndexedDB database `cfs-local-v1` with stores `cache` (one entry per
+  record, key `slice\0id`), `outbox`, `kv`. Falls back to an in-memory store if IndexedDB is
+  unavailable (`durable: false`). `createCacheWriter` writes only records that changed.
+- **`outbox.js`** — durable queue of cloud writes. An op is persisted **before** it is sent
+  (write-ahead): first synchronously to a small localStorage journal
+  (`cfs-outbox-journal-v1`, ops > 200 kB skipped), then to IndexedDB, after which the journal
+  entry is dropped; `start()` recovers journalled ops IndexedDB never got. Removed only on
+  server ack; failed ops stay queued, are reported, retried
+  with backoff and on reconnect; everything still queued is replayed on the next start.
+  Delivery is at-least-once, so every op must be idempotent.
+- **`ops.js`** — pure helpers. An op is `{ id, seq, at, label, patch?, stock? }`:
+  - `patch`: `{ "<path under shop/>": value | null }` — absolute sets/deletes, sent as ONE
+    multi-path `update(shop, patch)`. Naturally idempotent.
+  - `stock`: `[{ productId, variantId, delta }]` — sent as one `runTransaction` per product
+    whose body is `applyStockOp`: it skips the op if `product.appliedOps[op.id]` exists,
+    otherwise applies the deltas and records the op id in that ledger. This is what makes a
+    replay unable to decrement twice.
+
+Flow in `StoreManager`:
+
+1. **Boot:** open the local db → load cache + pending ops → state = cache with pending
+   `patch`es re-applied → `loaded`. (First run after upgrading: the old `cfs-cache-v1`
+   localStorage key is read once, written to IndexedDB, then removed.)
+2. **Subscribe** (`onValue` per slice, after `loaded`). For every snapshot — including the
+   first — non-item slices become `applyOps(mergeRemote(base, cloud+pending, current), pending)`.
+   Pending writes are therefore never discarded by an incoming snapshot.
+3. **Local change to sales / expenses / logs / vendorBills / dailyBills:** an effect (no
+   debounce) diffs state against the last-known cloud map (`buildSliceUpdate`) and enqueues the
+   field-level difference as a `patch` op.
+4. **Bills** use one code path — `recordSale`, `amendSale`, `voidSale` in `StoreManager`, built
+   from `recordSaleOp` / `amendSaleOp` / `voidSaleOp`. Each is a SINGLE op carrying the bill
+   patch and its stock deltas, applied to local state immediately. Billing never awaits the
+   network.
+5. **items:** `rawItems` state follows the cloud; what screens receive as `items` is
+   `overlayPendingStock(rawItems, pendingOps)` (pending stock ops not yet in a product's
+   ledger). Product add/edit/restock/delete are still direct transactions (`cloudWriteProduct`
+   etc.) and still need a connection.
+6. **Cache:** 400 ms after any change (and on `pagehide`/hidden) the changed records are written
+   to IndexedDB. The cache stores RAW items — never the overlaid numbers.
+7. **Custom subcategories** sync at `shop/meta/customSubcats/<key> = "Name"`; local-only values
+   are pushed up once the first snapshot arrives.
+
+Sidebar status: `Online · syncing live` / `Offline · N changes waiting to sync` /
+`⚠ N not synced — tap to retry` (failed ops while online).
 
 ## RTDB data model
 
@@ -73,7 +106,7 @@ arrays and empty objects, so every reader must tolerate missing fields.
 
 | Path | Shape |
 |---|---|
-| `shop/items/<id>` | `{ id, name, brand, category (group: Clothing/Footwear/Accessories), subcategory, code, supplier, imageUrl, notes, icon, purchasePrice, sellingPrice, mrp, discountPct, variants: [{ id, size, color, sku, stockQty, lowAt }], stock (cached sum), createdAt, updatedAt, version }` |
+| `shop/items/<id>` | `{ id, name, brand, category (group: Clothing/Footwear/Accessories), subcategory, code, supplier, imageUrl, notes, icon, purchasePrice, sellingPrice, mrp, discountPct, variants: [{ id, size, color, sku, stockQty, lowAt }], stock (cached sum), createdAt, updatedAt, version, appliedOps?: { <opId>: <ms> } }` |
 | `shop/sales/<id>` | `{ id, date "YYYY-MM-DD", time, lines: [{ name, qty, price, buyPrice, amount, size, color, category, subcategory, productId?, variantId?, misc? }], total, profit, payment "UPI"/"Cash"/"Udhari", subtotal?, discount?, discountPct?, customer?, mobile?, paid? (Udhari), paidMode?, payments?: [{ id, date, time, amount, mode }] }` |
 | `shop/expenses/<id>` | `{ id, date, desc, amount, category? }` |
 | `shop/logs/<id>` | `{ id, at (ms), date, time, type (sale/inventory/expense/import/backup/bill), message }` — capped at 2000, newest first |
@@ -81,20 +114,45 @@ arrays and empty objects, so every reader must tolerate missing fields.
 | `shop/dailyBills/<id>` | supplier bill, mirrored into `vendorBills` — see `src/lib/dailyBills.js` (`makeDailyBill`) |
 | `shop/shopConfig` | single object: `{ name, tagline, address, phone, email, gstin, currency, logoUrl (may be an inline base64 data-URL), receiptFooter, footwearSizeMin, footwearSizeMax }` |
 | `shop/meta/seeded` | `true` once the demo catalogue has been seeded (stops it resurrecting) |
+| `shop/meta/customSubcats/<key>` | `"Display Name"` — owner-added subcategories (key = `subcatKey(name)`) |
 
 Storage: bill proof files at `shop/bills/<billId>/<file>` (≤ 10 MB).
 
 Rules (`database.rules.json`, `storage.rules`): every read/write requires auth **and** the
 owner's email. There is no validation and no index yet (Phase 5).
 
-Device-local only (localStorage): `cfs-cache-v1` (full dataset cache),
-`cfs-shop-config-v1` (config cache), `cfs-custom-subcats-v1` (owner-added subcategories — not
-synced; Phase 1 item 6).
+Device-local only: IndexedDB `cfs-local-v1` (cache + outbox); localStorage
+`cfs-shop-config-v1` (config cache) and `cfs-custom-subcats-v1` (local copy of the synced
+subcategories). `cfs-cache-v1` (localStorage) is legacy and removed after its one-time move.
 
 ### Migration notes
 
-_None yet. Every data-model change must be recorded here: what changed, why old records still
-load, and how to roll back._
+Every data-model change must be recorded here: what changed, why old records still load, and
+how to roll back.
+
+**Phase 1 — `shop/items/<id>/appliedOps` (new, optional).** Map of outbox op id → client
+timestamp (ms) for stock ops already applied to that product. Written only by bill
+operations. Pruned to entries newer than 90 days once it exceeds 150 entries.
+- Old records (no `appliedOps`) load and behave exactly as before; the field is created on
+  the first bill that touches the product.
+- `normalizeProduct` passes the field through untouched; `cloudWriteProduct` preserves it.
+- An OLD app version (cached JS on another device) rewrites products through its own
+  `normalizeProduct`, which drops the field. Effect: only if that happens between a stock op
+  being applied and its replay could the op be applied twice. Stock numbers stay valid
+  numbers either way.
+- Roll back: revert the code; the extra field is ignored by old code and can be left in place
+  or deleted (`shop/items/*/appliedOps`).
+
+**Phase 1 — `shop/meta/customSubcats` (new, optional).** `{ <key>: "Name" }`. Old versions only
+read `shop/meta/seeded` and ignore it. Roll back: revert the code; delete the node if wanted.
+
+**Phase 1 — bill writes.** Bills are still plain records at `shop/sales/<id>` with the same
+fields; nothing about their shape changed. They are now written by a multi-path update at
+`shop/` instead of at `shop/sales/` — same resulting data.
+
+**Phase 1 — device cache.** Moved from localStorage `cfs-cache-v1` to IndexedDB
+`cfs-local-v1`. Not cloud data. Roll back: old code simply rebuilds its localStorage cache
+from the cloud on first load.
 
 ## Running things
 
@@ -129,9 +187,10 @@ email (see `resetEmulator` in `e2e/helpers.js`), and sign in.
 - `e2e/helpers.js` — emulator reset/admin REST helpers, `login`, `gotoTab`, `addProduct`,
   `addToCart`, `blockDatabase` / `unblockDatabase` (simulate the shop's internet dropping).
 - `e2e/smoke.spec.js` — pins current behaviour of the six core flows.
-- `e2e/phase1-bugs.spec.js` — one test per Phase 1 bug, asserting the **correct** behaviour and
-  marked `test.fail` (expected to fail). Fixing a bug makes its test report "expected to fail
-  but passed" → remove the `.fail` in the same commit as the fix.
+- `e2e/phase1-bugs.spec.js` — regression tests for the Phase 1 data-integrity bugs (they were
+  `test.fail` reproductions in Phase 0) plus offline edit/delete/expense and cache-migration
+  coverage. To reproduce a new bug first, write the test asserting correct behaviour and mark
+  it `test.fail`; remove the mark in the commit that fixes it.
 - One worker, shared emulator; every test wipes the database first. Tests never use
   `page.waitForTimeout` to "wait for sync" — poll the emulator with `eventually(...)`.
 
@@ -160,15 +219,21 @@ Automated (Playwright smoke, must stay green):
       and in the summary card
 - [ ] JSON export → wipe → import on a fresh profile → same items/sales/expenses
 
-Known-bug tests (expected to fail until Phase 1; then move up into the list above):
+Automated (Playwright `phase1-bugs.spec.js`, must stay green):
 
-- [ ] BUG 1 double-tap → one bill
-- [ ] BUG 2 offline sale completes
-- [ ] BUG 3 offline sale survives reload and syncs
-- [ ] BUG 4a sale + stock atomic when the tab is killed
-- [ ] BUG 4b delete bill + stock restore atomic when the tab is killed
-- [ ] BUG 5 > 5 MB dataset still opens offline
-- [ ] BUG 6 custom subcategory syncs across devices
+- [ ] Double-tap on Complete sale → one bill, one stock decrement
+- [ ] Offline sale completes: cart clears, "Saved on this device … will sync" toast
+- [ ] Offline sale survives a reload and syncs once back online (stock decremented once)
+- [ ] Tab killed right after Complete sale / Delete → bill and stock still agree after reopening
+- [ ] > 5 MB dataset still opens offline from the cache
+- [ ] Custom subcategory added on one device appears on another
+- [ ] Edit bill qty → exact stock correction, total/profit updated
+- [ ] Offline bill delete → pending count shown, synced after reopening online
+- [ ] Offline expense survives a reload and syncs
+- [ ] Old localStorage cache is moved to IndexedDB once and removed
+
+Unit (vitest): `outbox.test.js` (write-ahead, order, replay, idempotency, crash mid-replay,
+failure + backoff, retryNow), `ops.test.js`, `localdb.test.js`.
 
 Not automated — check by hand on a real phone after anything that touches them:
 
@@ -186,7 +251,12 @@ Not automated — check by hand on a real phone after anything that touches them
 - A sale whose `lines` is missing/empty (RTDB drops empty arrays) crashes Dashboard
   (`s.lines.length`). Real bills always have ≥ 1 line; only hand-edited or imported data can
   hit this.
-- A browser tab left open across a database wipe/restore writes its stale debounced state back.
+- A browser tab left open across a database wipe/restore writes its stale state back.
+- Product add / edit / restock / delete are direct transactions and still wait for the network
+  (the form does not close while offline). Only bills, expenses, logs and supplier/vendor
+  bills go through the outbox.
+- If IndexedDB is unavailable (some private-browsing modes) the cache and outbox are
+  memory-only: the app works, but nothing unsynced survives a reload.
 
 ## Report format for every phase
 
