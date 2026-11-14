@@ -40,7 +40,21 @@ import {
   subscribeCustomSubcats,
   CUSTOM_SUBCATS_PATH,
   subcatKey,
+  subscribeSalesSince,
+  subscribeUdhariSales,
+  fetchSalesRange,
+  fetchAllSales,
 } from "./lib/sync.js";
+import {
+  SALES_WINDOW_MONTHS,
+  windowStart,
+  monthStart,
+  prevDay,
+  unionSales,
+  looksKeyedById,
+  monthlyTotals,
+} from "./lib/salesWindow.js";
+import { AllSalesGate } from "./ui/AllSalesGate.jsx";
 import { todayStr, uid } from "./lib/format.js";
 import { buildSeedProducts, normalizeProduct, isProductLow } from "./lib/products.js";
 import { exportXlsx, exportJson, importXlsx } from "./lib/backup.js";
@@ -242,6 +256,24 @@ function StoreManager({ user, onLogout }) {
   const outboxRef = useRef(null);
   const pendingRef = useRef([]); // same as pendingOps, readable synchronously in listeners
   const legacyCache = useRef(false); // true until the old localStorage cache has been moved over
+
+  // ---- Sales window (lib/salesWindow.js): only recent bills + all credit bills are loaded and
+  //      live; older ones are fetched on demand. `salesFrom` = the earliest bill date loaded
+  //      (always a month start), or null when every bill is loaded.
+  const WINDOW_FROM = useMemo(() => windowStart(todayStr(), SALES_WINDOW_MONTHS), []);
+  const [salesFrom, setSalesFromState] = useState(WINDOW_FROM);
+  const salesFromRef = useRef(WINDOW_FROM);
+  const setSalesFrom = useCallback((v) => {
+    salesFromRef.current = v;
+    setSalesFromState(v);
+  }, []);
+  const salesSrc = useRef({ recent: undefined, udhari: undefined, older: {} });
+  const salesEmit = useRef(null); // re-evaluates the union after an older range was fetched
+  const olderLoad = useRef(null); // the fetch in flight, so requests run one at a time
+  // Revenue/profit per month for the months BEFORE the window, kept on the device so the
+  // Dashboard's monthly overview does not need the old bills themselves.
+  const [olderMonthly, setOlderMonthly] = useState({});
+  const monthlyMeta = useRef(null); // { until, months } as stored in the device db
   const lastSyncWarn = useRef(0);
 
   // 1) Open the device database, load the offline cache and the outbox, and paint from them.
@@ -293,6 +325,15 @@ function StoreManager({ user, onLogout }) {
         },
       });
       const pending = await outbox.start();
+      try {
+        const m = await ldb.kvGet("salesMonthly");
+        if (m && m.months) {
+          monthlyMeta.current = m;
+          if (!dead) setOlderMonthly(m.months);
+        }
+      } catch (e) {
+        console.error("monthly summary read failed", e);
+      }
       if (dead) return;
       outboxRef.current = outbox;
       const init = {};
@@ -334,79 +375,120 @@ function StoreManager({ user, onLogout }) {
       ["vendorBills", setBills],
       ["dailyBills", setDailyBills],
     ];
-    const unsubs = slices.map(([slice, setter]) =>
-      subscribeSlice(
-        slice,
-        (val) => {
-          // First run anywhere: seed the catalogue ONCE, guarded by a DB-level flag
-          // (shop/meta/seeded) so that deleting every product does NOT make the seed
-          // catalogue resurrect on the next sync/reload. (Fixes the grocery app's
-          // seed-resurrection bug.)
-          if (slice === "items" && val === null) {
-            if (seeded.current) {
+    // The reaction to a snapshot of `slice` (or, for windowed sales, to the union of the loaded
+    // sources — `windowed` true).
+    const makeHandler = (slice, setter) => (val, windowed) => {
+      // First run anywhere: seed the catalogue ONCE, guarded by a DB-level flag
+      // (shop/meta/seeded) so that deleting every product does NOT make the seed
+      // catalogue resurrect on the next sync/reload. (Fixes the grocery app's
+      // seed-resurrection bug.)
+      if (slice === "items" && val === null) {
+        if (seeded.current) {
+          synced.current.items = true;
+          return;
+        }
+        seeded.current = true; // guard within this session while the flag read is in flight
+        readMeta("seeded")
+          .then((already) => {
+            if (already) {
+              // Seeded before; the owner has since cleared the catalogue. Respect empty.
+              lastRemote.current.items = {};
               synced.current.items = true;
               return;
             }
-            seeded.current = true; // guard within this session while the flag read is in flight
-            readMeta("seeded")
-              .then((already) => {
-                if (already) {
-                  // Seeded before; the owner has since cleared the catalogue. Respect empty.
-                  lastRemote.current.items = {};
-                  synced.current.items = true;
-                  return;
-                }
-                const products = buildSeedProducts(todayStr());
-                const map = toMap(products);
-                lastRemote.current.items = map;
-                synced.current.items = true;
-                setItems(mapToArray("items", map));
-                overwriteSlice("items", map).catch((e) => console.error("seed write failed", e));
-                writeMeta("seeded", true).catch((e) => console.error("seed flag write failed", e));
-              })
-              .catch((e) => {
-                console.error("seed flag read failed", e);
-                // Fail safe: do NOT seed on error (avoids resurrecting data); just mark synced.
-                synced.current.items = true;
-              });
-            return;
-          }
-          const cloud = toMap(val);
-          // One-time migration of legacy array / numeric-keyed data → keyed-by-id map.
-          if (isLegacyShape(val, cloud)) {
-            overwriteSlice(slice, cloud).catch((e) => console.error("migrate failed", slice, e));
-          }
-          const base = lastRemote.current[slice];
-          const wasSynced = synced.current[slice];
-          synced.current[slice] = true;
-          if (slice === "items") {
-            // Products are only ever written by transactions; pending stock is overlaid at
-            // render time (see `items`), so the raw state simply follows the cloud.
-            lastRemote.current.items = cloud;
-            setter((curr) =>
-              mapToArray(slice, wasSynced ? mergeRemote(base, cloud, toMap(curr)) : cloud)
-            );
-            return;
-          }
-          // What the cloud says, plus every write of ours it has not acknowledged yet. This
-          // holds for the FIRST snapshot after a reload too — which is what keeps a bill that
-          // only exists in the outbox from being discarded.
-          const pend = pendingRef.current;
-          const theirs = applyOpsToMap(slice, cloud, pend);
-          lastRemote.current[slice] = theirs;
-          // Merge against the TRUE current state via the functional updater — NOT a ref that
-          // may lag a just-dispatched local edit by a render. This is what stops an incoming
-          // snapshot from silently reverting an edit/restock/delete made a moment earlier.
-          setter((curr) =>
-            mapToArray(slice, applyOpsToMap(slice, mergeRemote(base, theirs, toMap(curr)), pend))
-          );
-        },
-        (err) => {
-          console.error("sync read failed", slice, err);
-          notifyRef.current?.("⚠ Cloud sync error — check your connection or account access.");
-        }
-      )
-    );
+            const products = buildSeedProducts(todayStr());
+            const map = toMap(products);
+            lastRemote.current.items = map;
+            synced.current.items = true;
+            setItems(mapToArray("items", map));
+            overwriteSlice("items", map).catch((e) => console.error("seed write failed", e));
+            writeMeta("seeded", true).catch((e) => console.error("seed flag write failed", e));
+          })
+          .catch((e) => {
+            console.error("seed flag read failed", e);
+            // Fail safe: do NOT seed on error (avoids resurrecting data); just mark synced.
+            synced.current.items = true;
+          });
+        return;
+      }
+      const cloud = toMap(val);
+      // One-time migration of legacy array / numeric-keyed data → keyed-by-id map. NEVER for a
+      // windowed (partial) view: writing that back as the whole slice would delete every bill
+      // outside the window.
+      if (!windowed && isLegacyShape(val, cloud)) {
+        overwriteSlice(slice, cloud).catch((e) => console.error("migrate failed", slice, e));
+      }
+      const base = lastRemote.current[slice];
+      const wasSynced = synced.current[slice];
+      synced.current[slice] = true;
+      if (slice === "items") {
+        // Products are only ever written by transactions; pending stock is overlaid at
+        // render time (see `items`), so the raw state simply follows the cloud.
+        lastRemote.current.items = cloud;
+        setter((curr) =>
+          mapToArray(slice, wasSynced ? mergeRemote(base, cloud, toMap(curr)) : cloud)
+        );
+        return;
+      }
+      // What the cloud says, plus every write of ours it has not acknowledged yet. This
+      // holds for the FIRST snapshot after a reload too — which is what keeps a bill that
+      // only exists in the outbox from being discarded.
+      const pend = pendingRef.current;
+      const theirs = applyOpsToMap(slice, cloud, pend);
+      lastRemote.current[slice] = theirs;
+      // Merge against the TRUE current state via the functional updater — NOT a ref that
+      // may lag a just-dispatched local edit by a render. This is what stops an incoming
+      // snapshot from silently reverting an edit/restock/delete made a moment earlier.
+      setter((curr) =>
+        mapToArray(slice, applyOpsToMap(slice, mergeRemote(base, theirs, toMap(curr)), pend))
+      );
+    };
+    const onErr = (slice) => (err) => {
+      console.error("sync read failed", slice, err);
+      notifyRef.current?.("⚠ Cloud sync error — check your connection or account access.");
+    };
+    // Sales: two live queries (recent bills + all credit bills) instead of the whole slice.
+    const subscribeWindowedSales = (handle) => {
+      const src = salesSrc.current;
+      src.recent = undefined;
+      src.udhari = undefined;
+      let parts = [];
+      let full = null;
+      const emit = () => {
+        if (src.recent === undefined || src.udhari === undefined) return; // wait for both
+        handle(unionSales(src), true);
+      };
+      const goFull = () => {
+        // Stored data is still in a legacy shape → use the complete subscription so the
+        // one-time migration runs on complete data.
+        parts.forEach((u) => u());
+        parts = [];
+        salesEmit.current = null;
+        setSalesFrom(null);
+        full = subscribeSlice("sales", (v) => handle(v, false), onErr("sales"));
+      };
+      const part = (key) => (val) => {
+        if (full) return;
+        if (!looksKeyedById(val)) return goFull();
+        src[key] = toMap(val);
+        emit();
+      };
+      salesEmit.current = emit;
+      parts = [
+        subscribeSalesSince(WINDOW_FROM, part("recent"), onErr("sales")),
+        subscribeUdhariSales(part("udhari"), onErr("sales")),
+      ];
+      return () => {
+        parts.forEach((u) => u());
+        if (full) full();
+        salesEmit.current = null;
+      };
+    };
+    const unsubs = slices.map(([slice, setter]) => {
+      const handle = makeHandler(slice, setter);
+      if (slice === "sales" && WINDOW_FROM) return subscribeWindowedSales(handle);
+      return subscribeSlice(slice, (v) => handle(v, false), onErr(slice));
+    });
     const unsubConn = subscribeConnection((up) => {
       setOnline(up);
       if (up) outboxRef.current?.retryNow(); // back online → retry anything that failed
@@ -415,7 +497,84 @@ function StoreManager({ user, onLogout }) {
       unsubs.forEach((u) => u());
       unsubConn();
     };
-  }, [loaded]);
+  }, [loaded, WINDOW_FROM, setSalesFrom]);
+
+  // Fetch older bills once (not live) and add them to what is loaded. `from` = the earliest
+  // date wanted (rounded down to its month start); null = everything. Resolves true when the
+  // range is loaded, false when it could not be fetched (offline).
+  const saveMonthly = useCallback(
+    (months) => {
+      const rec = { until: WINDOW_FROM, months };
+      monthlyMeta.current = rec;
+      setOlderMonthly(months);
+      localDb.current?.kvSet("salesMonthly", rec).catch((e) => console.error("summary save", e));
+    },
+    [WINDOW_FROM]
+  );
+  const loadOlderSales = useCallback(
+    async (from) => {
+      for (;;) {
+        const cur = salesFromRef.current;
+        if (cur === null) return true;
+        const target = from ? monthStart(from) : null;
+        if (target && target >= cur) return true;
+        if (olderLoad.current) {
+          await olderLoad.current.catch(() => {});
+          continue; // re-check against what the previous request loaded
+        }
+        const timeout = new Promise((_, rej) =>
+          setTimeout(() => rej(new Error("timed out (offline?)")), 20000)
+        );
+        const run = Promise.race([
+          target ? fetchSalesRange(target, prevDay(cur)) : fetchAllSales(),
+          timeout,
+        ]).then((val) => {
+          if (salesFromRef.current === null) return; // switched to the full subscription meanwhile
+          if (!looksKeyedById(val)) throw new Error("sales are stored in a legacy shape");
+          const got = toMap(val);
+          salesSrc.current.older = { ...salesSrc.current.older, ...got };
+          setSalesFrom(target);
+          salesEmit.current?.();
+          if (!target) {
+            // Everything is in hand → refresh the saved monthly summary for the old months.
+            const before = Object.values(got).filter((x) => String(x.date || "") < WINDOW_FROM);
+            saveMonthly(monthlyTotals(before));
+          }
+        });
+        olderLoad.current = run;
+        try {
+          await run;
+          return true;
+        } catch (e) {
+          console.error("loading older bills failed", e);
+          return false;
+        } finally {
+          olderLoad.current = null;
+        }
+      }
+    },
+    [WINDOW_FROM, setSalesFrom, saveMonthly]
+  );
+  // Every bill currently known (cloud + un-acked local writes), as an array — for backup.
+  const allLoadedSales = () => mapToArray("sales", lastRemote.current.sales);
+
+  // Once per device per month: summarise the months that have just left the window.
+  const monthlyDone = useRef(false);
+  useEffect(() => {
+    if (!loaded || !online || !WINDOW_FROM || monthlyDone.current) return;
+    const have = monthlyMeta.current;
+    if (have && have.until >= WINDOW_FROM) return;
+    monthlyDone.current = true;
+    fetchSalesRange((have && have.until) || "0000-00-00", prevDay(WINDOW_FROM))
+      .then((val) => {
+        if (!looksKeyedById(val)) return;
+        saveMonthly({ ...((have && have.months) || {}), ...monthlyTotals(toMap(val)) });
+      })
+      .catch((e) => {
+        monthlyDone.current = false;
+        console.error("monthly summary failed", e);
+      });
+  }, [loaded, online, WINDOW_FROM, saveMonthly]);
 
   // 3) When a slice changes locally, turn the difference from the last-known cloud state into
   //    an outbox op (field-level deltas). The outbox persists it to IndexedDB, sends it, retries
@@ -648,13 +807,25 @@ function StoreManager({ user, onLogout }) {
   };
 
   const exportData = async (fmt) => {
-    const data = { items, sales, expenses, logs, vendorBills: bills, dailyBills };
-    const fname = `${slugify(config.name)}-${todayStr()}.${fmt === "xlsx" ? "xlsx" : "json"}`;
+    // A backup must contain EVERY bill, not just the loaded window.
+    let allSales = sales;
+    let partial = "";
+    if (salesFromRef.current !== null) {
+      notify("Preparing backup — loading full sales history…");
+      if (await loadOlderSales(null)) allSales = allLoadedSales();
+      else partial = salesFromRef.current;
+    }
+    const data = { items, sales: allSales, expenses, logs, vendorBills: bills, dailyBills };
+    const fname = `${slugify(config.name)}-${todayStr()}${partial ? "-PARTIAL-since-" + partial : ""}.${fmt === "xlsx" ? "xlsx" : "json"}`;
     try {
       if (fmt === "xlsx") await exportXlsx(data, fname);
       else exportJson(data, fname);
-      addLog("backup", `Backup downloaded (${fmt.toUpperCase()})`);
-      notify(`Backup downloaded (${fmt.toUpperCase()})`);
+      addLog("backup", `Backup downloaded (${fmt.toUpperCase()})${partial ? " — PARTIAL" : ""}`);
+      notify(
+        partial
+          ? `⚠ Offline — this backup only has bills since ${partial}. Export again when online.`
+          : `Backup downloaded (${fmt.toUpperCase()})`
+      );
     } catch (err) {
       console.error("backup failed", err);
       notify("⚠ Could not create the backup file.");
@@ -671,6 +842,10 @@ function StoreManager({ user, onLogout }) {
       if (!d || !Array.isArray(d.items)) throw new Error("bad file");
       if (!confirm("Restore this backup? It will REPLACE all current data everywhere it syncs."))
         return;
+      // Replacing "all current data" needs all current bills loaded, so the ones that are not
+      // in the backup are removed too — not just those inside the loaded window.
+      if (!(await loadOlderSales(null)))
+        return notify("⚠ Restore needs an internet connection — nothing was changed.");
       // Products go to the cloud (they're transaction-managed, not delta-pushed); local state
       // updates via the echo. Mark seeded so the restore isn't wiped by the first-run seeder.
       const products = d.items.map(normalizeProduct);
@@ -878,6 +1053,9 @@ function StoreManager({ user, onLogout }) {
                 sales={sales}
                 lowStock={lowStock}
                 goBilling={() => setTab("billing")}
+                salesFrom={salesFrom}
+                olderMonthly={olderMonthly}
+                loadOlderSales={loadOlderSales}
               />
             ) : tab === "billing" ? (
               <Billing
@@ -913,13 +1091,19 @@ function StoreManager({ user, onLogout }) {
                 setSales={setSales}
                 amendSale={amendSale}
                 voidSale={voidSale}
+                salesFrom={salesFrom}
+                loadOlderSales={loadOlderSales}
                 notify={notify}
                 log={addLog}
               />
             ) : tab === "finance" && tabEnabled("finance") ? (
-              <Finance sales={sales} expenses={expenses} />
+              <AllSalesGate salesFrom={salesFrom} loadOlderSales={loadOlderSales} allowPartial>
+                <Finance sales={sales} expenses={expenses} />
+              </AllSalesGate>
             ) : tab === "stats" ? (
-              <Stats sales={sales} expenses={expenses} items={items} />
+              <AllSalesGate salesFrom={salesFrom} loadOlderSales={loadOlderSales} allowPartial>
+                <Stats sales={sales} expenses={expenses} items={items} />
+              </AllSalesGate>
             ) : tab === "udhari" ? (
               <Udhari sales={sales} setSales={setSales} notify={notify} log={addLog} />
             ) : tab === "expense" ? (
@@ -954,21 +1138,26 @@ function StoreManager({ user, onLogout }) {
             ) : tab === "settings" ? (
               <Settings config={config} onSave={updateConfig} notify={notify} />
             ) : tab === "admin" ? (
-              <Admin
-                items={items}
-                setSales={setSales}
-                setExpenses={setExpenses}
-                setLogs={setLogs}
-                user={user}
-                notify={notify}
-                log={addLog}
-              />
+              <AllSalesGate salesFrom={salesFrom} loadOlderSales={loadOlderSales}>
+                <Admin
+                  items={items}
+                  setSales={setSales}
+                  setExpenses={setExpenses}
+                  setLogs={setLogs}
+                  user={user}
+                  notify={notify}
+                  log={addLog}
+                />
+              </AllSalesGate>
             ) : (
               <Dashboard
                 items={items}
                 sales={sales}
                 lowStock={lowStock}
                 goBilling={() => setTab("billing")}
+                salesFrom={salesFrom}
+                olderMonthly={olderMonthly}
+                loadOlderSales={loadOlderSales}
               />
             )}
           </Suspense>

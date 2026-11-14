@@ -1,5 +1,5 @@
 import { useShopConfig } from "../config/shopConfig.js";
-import { useState, useMemo, memo } from "react";
+import { useState, useMemo, memo, useEffect } from "react";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { money, INR, dateStr, todayStr, uid } from "../lib/format.js";
 import { Header, Empty, Modal, Field } from "../ui/index.jsx";
@@ -157,7 +157,17 @@ const BillRow = memo(function BillRow({
 const BILLS_PER_DATE = 200; // a single day rarely has more; beyond this, show on request
 const DATES_PER_PAGE = 60;
 
-export function SalesHistory({ sales, items, setSales, amendSale, voidSale, notify, log }) {
+export function SalesHistory({
+  sales,
+  items,
+  setSales,
+  amendSale,
+  voidSale,
+  notify,
+  log,
+  salesFrom = null,
+  loadOlderSales,
+}) {
   const config = useShopConfig();
   const [open, setOpen] = useState(null);
   const [openDates, setOpenDates] = useState(() => new Set()); // expanded past dates (today is always open)
@@ -175,6 +185,24 @@ export function SalesHistory({ sales, items, setSales, amendSale, voidSale, noti
   // Search matches a bill when EVERY space-separated term is found somewhere in it —
   // item names, customer, mobile, payment, date/time, bill id, or any amount/quantity.
   const dq = useDebouncedValue(q, 200);
+  // Only recent bills are loaded by default (lib/salesWindow.js). Older ones are fetched once,
+  // on request — or automatically when the "from" date reaches back before what is loaded.
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const loadOlder = async (fromDate) => {
+    if (!loadOlderSales || loadingOlder) return;
+    setLoadingOlder(true);
+    const ok = await loadOlderSales(fromDate);
+    setLoadingOlder(false);
+    if (!ok) notify("⚠ Older bills need an internet connection.");
+  };
+  useEffect(() => {
+    if (salesFrom && from && from < salesFrom && loadOlderSales) loadOlderSales(from);
+  }, [from, salesFrom, loadOlderSales]);
+  const olderStep = () => {
+    const d = new Date(salesFrom + "T00:00");
+    d.setMonth(d.getMonth() - 3);
+    return dateStr(d);
+  };
   const terms = dq.trim().toLowerCase().split(/\s+/).filter(Boolean);
   const searching = terms.length > 0;
   const matchSale = (s) => {
@@ -627,6 +655,30 @@ export function SalesHistory({ sales, items, setSales, amendSale, voidSale, noti
         >
           Show older dates ({byDate.length - dateLimit} more)
         </button>
+      )}
+
+      {salesFrom && (
+        <section
+          style={{ ...S.panel, marginBottom: 14, fontSize: 13, color: "#566", textAlign: "center" }}
+        >
+          Showing bills since{" "}
+          <b>
+            {new Date(salesFrom + "T00:00").toLocaleDateString("en-IN", {
+              day: "numeric",
+              month: "short",
+              year: "numeric",
+            })}
+          </b>{" "}
+          (plus all credit bills).
+          <div style={{ marginTop: 8, display: "flex", gap: 8, justifyContent: "center" }}>
+            <button className="btn" disabled={loadingOlder} onClick={() => loadOlder(olderStep())}>
+              {loadingOlder ? "Loading…" : "Load 3 more months"}
+            </button>
+            <button className="btn" disabled={loadingOlder} onClick={() => loadOlder(null)}>
+              Load all bills
+            </button>
+          </div>
+        </section>
       )}
 
       {editing && (

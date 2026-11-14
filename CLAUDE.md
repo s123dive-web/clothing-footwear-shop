@@ -31,23 +31,35 @@ counter, mostly on a phone, with real sales data.** Read the hard rules before c
   Realtime Database, Storage), recharts, SheetJS `xlsx` (from cdn.sheetjs.com), pdfjs-dist.
 - **Hosting:** GitHub Pages, built and deployed by `.github/workflows/deploy.yml` on push to
   `main`. Production base path is `/clothing-footwear-shop/`.
-- **Entry:** `index.html` → `src/main.jsx` (ErrorBoundary + `window.storage` shim) →
-  `src/clothing-footwear-shop.jsx`.
-- **`src/clothing-footwear-shop.jsx`** (~9,500 lines) is the whole UI: `App` (auth gate) →
-  `Login` | `StoreManager`. `StoreManager` owns all state (items, sales, expenses, logs,
-  vendorBills, dailyBills, config, customCats), the sync effects, the sidebar and the toast, and
-  renders one screen per tab: Dashboard, Billing, Inventory (+ProductForm, RestockModal),
-  SalesHistory, Finance (flagged off), Stats (Reports), Udhari, Expenses, DailyBills (Supplier
-  Bills), Alerts, VendorBills, RawData (Data Import), Logs, Settings, Admin. Shared UI
-  (`Header`, `Card`, `Field`, `Empty`, `Section`, `Modal`, `S`, `CSS`) is at the bottom of the
-  same file.
+- **Entry:** `index.html` → `src/main.jsx` (ErrorBoundary, `window.storage` shim,
+  `UpdatePrompt`) → `src/clothing-footwear-shop.jsx`.
+- **`src/clothing-footwear-shop.jsx`** (~1,150 lines) is the root only: `App` (auth gate) and
+  `StoreManager`, which owns all state (items, sales, expenses, logs, vendorBills, dailyBills,
+  config, customCats), the sync effects, the sales window, the sidebar and the toast.
+- **`src/screens/<Name>.jsx`** — one file per screen: Login, FirebaseSetupNeeded, Dashboard
+  (+ `DashboardCharts.jsx`), Billing, Inventory (+ProductForm, RestockModal), SalesHistory,
+  Finance (flagged off), Stats (Reports), Udhari, Expenses, DailyBills (Supplier Bills),
+  Alerts, VendorBills, RawData (Data Import), Logs, Settings, Admin. **Dashboard and Billing
+  are in the main chunk; every other tab is `React.lazy`** (see the `lazyScreen` list in the
+  root). Dashboard's chart sections are lazy too, so `recharts` loads only when charts render.
+- **`src/ui/`** — `index.jsx` (Header, Card, Field, Empty, Section, Modal, ColorDot,
+  VariantChip), `styles.js` (`S`, `CSS`), `charts.jsx` (shared recharts helpers — import ONLY
+  from lazy modules), `hooks.js` (`useDebouncedValue`, `useStableCallback`, `usePagedLimit`),
+  `AllSalesGate.jsx`, `UpdatePrompt.jsx`.
 - **`src/lib/`** — pure, unit-tested helpers: `sync.js` (array↔map bridge, `buildSliceUpdate`,
-  3-way `mergeRemote`, `updateItemAtomic`), `products.js` (variants, stock maths,
-  `normalizeProduct`), `catalog.js` (groups, subcategories, sizes, seed list), `stats.js`
-  (reports maths), `dailyBills.js`, `bills.js` (Storage proofs), `backup.js` (JSON/XLSX
-  export, XLSX import), `parse.js` (Data Import parsing).
+  3-way `mergeRemote`, `updateItemAtomic`, `sendOp`, sales queries), `ops.js`, `outbox.js`,
+  `localdb.js`, `salesWindow.js`, `products.js` (variants, stock maths, `normalizeProduct`),
+  `cloudProducts.js` (product transactions), `catalog.js`, `stats.js`, `dailyBills.js`,
+  `bills.js` (Storage proofs), `backup.js` (JSON/XLSX export, XLSX import), `parse.js` (Data
+  Import parsing), `format.js` (INR, money, dates, uid), `print.js` (receipt), `domain.js`.
+  `xlsx` and `pdfjs-dist` are dynamic imports inside `backup.js` / `parse.js` — never import
+  them statically.
 - **`src/config/`** — `firebase.js` (live config + emulator switch), `shopConfig.js`,
   `currency.js`.
+- **PWA** — `vite-plugin-pwa` (`generateSW`, `registerType: "prompt"`). The service worker
+  precaches the app shell and all tab chunks (xlsx / pdf are cached on first use).
+  `src/ui/UpdatePrompt.jsx` registers it in production builds only and shows "Update available"
+  — the new version activates only when the user taps Reload. Never switch to `autoUpdate`.
 
 ### How sync works (since Phase 1)
 
@@ -92,6 +104,27 @@ Flow in `StoreManager`:
 7. **Custom subcategories** sync at `shop/meta/customSubcats/<key> = "Name"`; local-only values
    are pushed up once the first snapshot arrives.
 
+8. **Sales window** (`lib/salesWindow.js`, `SALES_WINDOW_MONTHS = 3`; `0` restores "load
+   everything live"). `sales` state = union of: `recent` (live query, bills dated on/after the
+   first day of the month 3 months back), `udhari` (live query, every credit bill of any age),
+   `older` (one-shot fetches). `salesFrom` = earliest date loaded, `null` = all.
+   `loadOlderSales(from | null)` fetches more — used by Sales History ("Load 3 more months" /
+   "Load all bills" / an earlier "from" date), Dashboard (viewing an old day or a long period),
+   `AllSalesGate` around Reports / Finance / Admin, and by backup export and restore (both load
+   everything first; an offline export is named `…-PARTIAL-since-<date>`).
+   - The union is fed to the same snapshot handler as a full slice, so merge / outbox logic is
+     unchanged. A windowed view is NEVER written back as the slice; if stored sales are in a
+     legacy (non-id-keyed) shape the code falls back to the full subscription.
+   - Dashboard's monthly overview uses `olderMonthly` (IndexedDB `kv` key `salesMonthly`:
+     revenue/profit/bill count per month before the window), refreshed once a month per
+     device and whenever everything is loaded.
+   - Needs `.indexOn: ["date", "payment"]` on `shop/sales` (in `database.rules.json`, **not
+     deployed by us**). Without the index the queries still return correct data but download
+     every bill first.
+   - Known limits: best-seller ★ / customer autocomplete in Billing only see loaded bills; a
+     bill back-dated to before the window disappears from view once synced (it is in the
+     cloud and shows after "load older"); `older` data is static until reload.
+
 Sidebar status: `Online · syncing live` / `Offline · N changes waiting to sync` /
 `⚠ N not synced — tap to retry` (failed ops while online).
 
@@ -116,7 +149,8 @@ arrays and empty objects, so every reader must tolerate missing fields.
 Storage: bill proof files at `shop/bills/<billId>/<file>` (≤ 10 MB).
 
 Rules (`database.rules.json`, `storage.rules`): every read/write requires auth **and** the
-owner's email. There is no validation and no index yet (Phase 5).
+owner's email. `shop/sales` has `.indexOn: ["date", "payment"]` in the file (Phase 2) — the
+owner must deploy it. There is no validation yet (Phase 5).
 
 Device-local only: IndexedDB `cfs-local-v1` (cache + outbox); localStorage
 `cfs-shop-config-v1` (config cache) and `cfs-custom-subcats-v1` (local copy of the synced
@@ -147,6 +181,10 @@ read `shop/meta/seeded` and ignore it. Roll back: revert the code; delete the no
 fields; nothing about their shape changed. They are now written by a multi-path update at
 `shop/` instead of at `shop/sales/` — same resulting data.
 
+**Phase 2 — no cloud data-model change.** `database.rules.json` gains
+`shop/sales/.indexOn: ["date", "payment"]` (an index, not a shape change; safe to deploy and to
+remove). New device-local IndexedDB `kv` entry `salesMonthly`.
+
 **Phase 1 — device cache.** Moved from localStorage `cfs-cache-v1` to IndexedDB
 `cfs-local-v1`. Not cloud data. Roll back: old code simply rebuilds its localStorage cache
 from the cloud on first load.
@@ -164,7 +202,7 @@ Node `^20.19 || >=22.12` (CI uses 24). `npm ci` is verified on Node 20, 22 and 2
 | `npm test` | Vitest unit tests (`src/**/*.test.js`). |
 | `npm run lint` | ESLint. |
 | `npm run build` | Production build to `dist/`. |
-| `npm run test:e2e` | Playwright (`e2e/*.spec.js`); starts the emulators and an emulator-mode dev server on :5174 itself. First time: `npx playwright install chromium`. |
+| `npm run test:e2e` | Playwright (`e2e/*.spec.js`); starts the emulators, an emulator-mode dev server on :5174 and (for the `pwa` project) a production build + `vite preview` on :5175. First time: `npx playwright install chromium`. |
 
 ### Emulator switch
 
@@ -188,6 +226,10 @@ email (see `resetEmulator` in `e2e/helpers.js`), and sign in.
   `test.fail` reproductions in Phase 0) plus offline edit/delete/expense and cache-migration
   coverage. To reproduce a new bug first, write the test asserting correct behaviour and mark
   it `test.fail`; remove the mark in the commit that fixes it.
+- `e2e/window.spec.js` — sales window: older bills on demand, old credit bills always loaded,
+  full backup/restore, deletes never touch unloaded bills.
+- `e2e/pwa.spec.js` — runs against the PRODUCTION build (`pwa` project) with every non-local
+  request aborted: manifest, offline app shell, no auto-activation of a new version.
 - One worker, shared emulator; every test wipes the database first. Tests never use
   `page.waitForTimeout` to "wait for sync" — poll the emulator with `eventually(...)`.
 
@@ -229,8 +271,20 @@ Automated (Playwright `phase1-bugs.spec.js`, must stay green):
 - [ ] Offline expense survives a reload and syncs
 - [ ] Old localStorage cache is moved to IndexedDB once and removed
 
+Automated (Playwright `window.spec.js` + `pwa.spec.js`, must stay green):
+
+- [ ] Only recent bills load; "Load all bills" / an earlier from-date loads older ones; loading
+      writes nothing
+- [ ] An old unpaid credit bill is in the Udhari book
+- [ ] Reports load the full history once
+- [ ] Deleting a recent bill leaves unloaded bills untouched
+- [ ] Backup has every bill; restore removes bills outside the window too
+- [ ] Monthly summary for pre-window months is saved on the device
+- [ ] Manifest + icons served; app shell opens offline; new version waits for the user
+
 Unit (vitest): `outbox.test.js` (write-ahead, order, replay, idempotency, crash mid-replay,
-failure + backoff, retryNow), `ops.test.js`, `localdb.test.js`.
+failure + backoff, retryNow), `ops.test.js`, `localdb.test.js`, `salesWindow.test.js`,
+`print.test.js`.
 
 Not automated — check by hand on a real phone after anything that touches them:
 
@@ -239,6 +293,9 @@ Not automated — check by hand on a real phone after anything that touches them
 - [ ] Vendor / Supplier bill proof upload and view (Firebase Storage)
 - [ ] Data Import from a PDF / pasted text
 - [ ] Mobile layout (< 820 px): sidebar, Billing grid, modals
+- [ ] Install to home screen (Android Chrome "Add to Home screen"); open with flight mode on
+- [ ] After a deploy: "Update available" bar appears; Reload switches version; a bill in
+      progress is not lost if Reload is NOT tapped
 
 ## Known issues found but not yet scheduled
 

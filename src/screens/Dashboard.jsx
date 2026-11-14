@@ -1,4 +1,4 @@
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import { todayStr, money, INR } from "../lib/format.js";
 import { productStock, productLowVariants, variantLabel } from "../lib/products.js";
 import { Header, Card, Empty } from "../ui/index.jsx";
@@ -18,9 +18,21 @@ const ChartsLoading = () => (
 );
 
 // ---------- Dashboard ----------
-export function Dashboard({ items, sales, lowStock, goBilling }) {
+export function Dashboard({
+  items,
+  sales,
+  lowStock,
+  goBilling,
+  salesFrom = null,
+  olderMonthly,
+  loadOlderSales,
+}) {
   const [date, setDate] = useState(todayStr());
   const isToday = date === todayStr();
+  // Viewing a day from before the loaded window → fetch that month once.
+  useEffect(() => {
+    if (salesFrom && date < salesFrom && loadOlderSales) loadOlderSales(date);
+  }, [date, salesFrom, loadOlderSales]);
   const daySales = sales.filter((s) => s.date === date);
   const rev = money(daySales.reduce((a, s) => a + s.total, 0));
   const profit = money(daySales.reduce((a, s) => a + s.profit, 0));
@@ -157,7 +169,12 @@ export function Dashboard({ items, sales, lowStock, goBilling }) {
       </div>
 
       <Suspense fallback={<ChartsLoading />}>
-        <DashOverTimeCharts sales={sales} />
+        <DashOverTimeCharts
+          sales={sales}
+          salesFrom={salesFrom}
+          olderMonthly={olderMonthly}
+          loadOlderSales={loadOlderSales}
+        />
       </Suspense>
     </div>
   );

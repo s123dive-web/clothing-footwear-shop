@@ -20,6 +20,14 @@
     // lines once the owner's email is verified, to reject unverified sign-ins.
     // ----------------------------------------------------------------------
     ".read": "auth != null && auth.token.email == 'vijaykshopvarje@gmail.com'",
-    ".write": "auth != null && auth.token.email == 'vijaykshopvarje@gmail.com'"
+    ".write": "auth != null && auth.token.email == 'vijaykshopvarje@gmail.com'",
+    "shop": {
+      "sales": {
+        // The app loads only recent bills (by date) and all credit bills (by payment) — see
+        // src/lib/salesWindow.js. These indexes let the server do that filtering; without
+        // them the queries still work but download every bill first.
+        ".indexOn": ["date", "payment"]
+      }
+    }
   }
 }

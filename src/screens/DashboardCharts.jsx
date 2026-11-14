@@ -1,7 +1,8 @@
 // The chart sections of the Dashboard. Loaded lazily (React.lazy in Dashboard.jsx) so the
 // recharts bundle is only fetched once a chart is actually about to be shown — the Dashboard's
 // cards, low-stock list and recent bills paint without waiting for it.
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
+import { mergeMonthly } from "../lib/salesWindow.js";
 import { todayStr, money, dateStr, INR } from "../lib/format.js";
 import {
   buildSeries,
@@ -82,7 +83,7 @@ export function DashTrendCharts({ sales, monthSales, monthName }) {
 }
 
 // Bottom of the Dashboard: monthly overview + the day-wise / week-wise "over time" charts.
-export function DashOverTimeCharts({ sales }) {
+export function DashOverTimeCharts({ sales, salesFrom = null, olderMonthly, loadOlderSales }) {
   // --- "Over time" charts: user picks a period, we show day-wise & week-wise series. ---
   const [period, setPeriod] = useState("7d");
   const [customFrom, setCustomFrom] = useState(() => {
@@ -132,14 +133,9 @@ export function DashOverTimeCharts({ sales }) {
         y++;
       }
     }
-    const agg = Object.fromEntries(keys.map((k) => [k, { revenue: 0, profit: 0 }]));
-    sales.forEach((s) => {
-      const k = (s.date || "").slice(0, 7);
-      if (agg[k]) {
-        agg[k].revenue += s.total || 0;
-        agg[k].profit += s.profit || 0;
-      }
-    });
+    // Months inside the loaded window are summed from the bills; earlier months come from the
+    // summary saved on this device (the old bills themselves are not loaded).
+    const agg = mergeMonthly(keys, sales, olderMonthly, salesFrom);
     return keys.map((k) => ({
       key: k,
       label: new Date(k + "-01T00:00").toLocaleDateString("en-IN", {
@@ -149,7 +145,13 @@ export function DashOverTimeCharts({ sales }) {
       revenue: money(agg[k].revenue),
       profit: money(agg[k].profit),
     }));
-  }, [sales]);
+  }, [sales, olderMonthly, salesFrom]);
+
+  // A period that starts before the loaded window → fetch that range once.
+  useEffect(() => {
+    if (salesFrom && range.from && range.from < salesFrom && loadOlderSales)
+      loadOlderSales(range.from);
+  }, [range.from, salesFrom, loadOlderSales]);
 
   return (
     <>

@@ -12,7 +12,19 @@
 //
 // The React layer keeps working with plain arrays; this module is the only array↔map bridge.
 
-import { ref, onValue, set, update, runTransaction, get } from "firebase/database";
+import {
+  ref,
+  onValue,
+  set,
+  update,
+  runTransaction,
+  get,
+  query,
+  orderByChild,
+  startAt,
+  endAt,
+  equalTo,
+} from "firebase/database";
 import { db } from "../config/firebase.js";
 import { applyStockOp, stockByProduct } from "./ops.js";
 
@@ -195,3 +207,22 @@ export function subscribeCustomSubcats(onData, onError) {
     onError
   );
 }
+
+// ---------------------------------------------------------------------------------------------
+// Windowed sales (see salesWindow.js). These need `.indexOn: ["date", "payment"]` on shop/sales
+// in the database rules to be efficient; without the index they still return correct data (the
+// SDK filters on the client and logs a warning).
+// ---------------------------------------------------------------------------------------------
+const salesRef = () => ref(db, path("sales"));
+export const subscribeSalesSince = (from, onData, onError) =>
+  onValue(query(salesRef(), orderByChild("date"), startAt(from)), (s) => onData(s.val()), onError);
+export const subscribeUdhariSales = (onData, onError) =>
+  onValue(
+    query(salesRef(), orderByChild("payment"), equalTo("Udhari")),
+    (s) => onData(s.val()),
+    onError
+  );
+// One-shot reads. `to` is inclusive.
+export const fetchSalesRange = (from, to) =>
+  get(query(salesRef(), orderByChild("date"), startAt(from), endAt(to))).then((s) => s.val());
+export const fetchAllSales = () => get(salesRef()).then((s) => s.val());
