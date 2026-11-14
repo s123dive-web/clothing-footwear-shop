@@ -14,6 +14,7 @@
 
 import { ref, onValue, set, update, runTransaction, get } from "firebase/database";
 import { db } from "../config/firebase.js";
+import { applyStockOp, stockByProduct } from "./ops.js";
 
 export const SLICES = ["items", "sales", "expenses", "logs", "vendorBills", "dailyBills"];
 
@@ -73,6 +74,7 @@ export function buildSliceUpdate(prevMap, nextArr) {
     const id = String(rec.id);
     nextMap[id] = rec;
     const prev = prevMap[id];
+    if (prev === rec) continue; // same object as last time → unchanged, skip the field compare
     if (!prev) {
       updates[id] = sanitize(rec); // brand-new record → write the whole node
       continue;
@@ -156,5 +158,40 @@ export function subscribeConnection(cb) {
     ref(db, ".info/connected"),
     (snap) => cb(snap.val() === true),
     () => cb(false)
+  );
+}
+
+// ---------------------------------------------------------------------------------------------
+// Outbox delivery. Sends one op (see outbox.js / ops.js) and resolves when the server has
+// acknowledged ALL of it: the multi-path `patch` (one atomic update under shop/) and one
+// ledger-guarded transaction per product for the `stock` deltas. Safe to call again for the
+// same op — the patch is absolute values and the ledger stops a second stock application.
+// ---------------------------------------------------------------------------------------------
+export function sendOp(op, { today = "" } = {}) {
+  const tasks = [];
+  if (op.patch && Object.keys(op.patch).length) tasks.push(update(ref(db, "shop"), op.patch));
+  for (const [pid, lines] of stockByProduct(op.stock)) {
+    tasks.push(
+      updateItemAtomic(pid, (curr) => applyStockOp(curr, op.id, lines, Date.now(), today))
+    );
+  }
+  return Promise.all(tasks);
+}
+
+// Owner-added subcategories, shared by every device: shop/meta/customSubcats/<key> = "Name".
+// A map (not an array) so two devices adding different names never overwrite each other.
+export const CUSTOM_SUBCATS_PATH = "meta/customSubcats";
+export const subcatKey = (name) =>
+  encodeURIComponent(String(name).trim().toLowerCase()).replace(/[.#$[\]/%]/g, "_");
+export function subscribeCustomSubcats(onData, onError) {
+  return onValue(
+    ref(db, "shop/" + CUSTOM_SUBCATS_PATH),
+    (snap) => {
+      const v = snap.val();
+      onData(
+        v && typeof v === "object" ? Object.values(v).filter((x) => typeof x === "string") : []
+      );
+    },
+    onError
   );
 }

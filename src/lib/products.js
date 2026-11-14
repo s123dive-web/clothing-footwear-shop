@@ -127,6 +127,9 @@ export function normalizeProduct(raw) {
     version: num(r.version) || 1,
   };
   p.stock = productStock(p);
+  // Optional ledger of stock ops already applied to this product (see lib/ops.js applyStockOp).
+  // Carried through untouched so normalising a record never forgets what was applied to it.
+  if (r.appliedOps && typeof r.appliedOps === "object") p.appliedOps = r.appliedOps;
   return p;
 }
 

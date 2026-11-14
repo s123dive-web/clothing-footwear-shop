@@ -69,14 +69,28 @@ import {
   isLegacyShape,
   buildSliceUpdate,
   mergeRemote,
-  writeSlice,
   overwriteSlice,
   subscribeSlice,
   subscribeConnection,
   updateItemAtomic,
   readMeta,
   writeMeta,
+  sendOp,
+  subscribeCustomSubcats,
+  CUSTOM_SUBCATS_PATH,
+  subcatKey,
+  SLICES,
 } from "./lib/sync.js";
+import { openLocalDb, createCacheWriter } from "./lib/localdb.js";
+import { createOutbox } from "./lib/outbox.js";
+import {
+  applyPatchToMap,
+  applyOpsToMap,
+  overlayPendingStock,
+  recordSaleOp,
+  amendSaleOp,
+  voidSaleOp,
+} from "./lib/ops.js";
 import { parseFile, parseRawText } from "./lib/parse.js";
 import { exportJson, exportXlsx, importXlsx } from "./lib/backup.js";
 import { uploadBillProof, deleteBillProof, PROOF_ACCEPT, MAX_PROOF_BYTES } from "./lib/bills.js";
@@ -563,6 +577,8 @@ async function cloudWriteProduct(product) {
     createdAt: (curr && curr.createdAt) || p.createdAt || todayStr(),
     updatedAt: todayStr(),
     version: ((curr && curr.version) || 0) + 1,
+    // Keep the ledger of already-applied stock ops (lib/ops.js) across an owner edit.
+    ...(curr && curr.appliedOps ? { appliedOps: curr.appliedOps } : {}),
   }));
   return p.id;
 }
@@ -580,43 +596,18 @@ const cloudRestockVariant = (productId, variantId, qty) =>
     return p;
   });
 
-// Atomically apply a signed delta to one variant's stock (used to restore stock on bill delete).
-const cloudAdjustVariant = (productId, variantId, delta) =>
-  updateItemAtomic(productId, (curr) => {
-    if (!curr) return curr;
-    const p = applyVariantDelta(normalizeProduct(curr), variantId, Number(delta) || 0);
-    p.updatedAt = todayStr();
-    p.version = (curr.version || 0) + 1;
-    return p;
-  });
-
-// Atomically decrement stock for every (non-misc) line of a completed bill. One transaction per
-// product so a bill's lines for the same product commit together against the freshest counts.
-async function cloudSellCart(cart) {
-  const byProduct = new Map();
-  for (const c of cart) {
-    if (c.misc || !c.productId) continue;
-    if (!byProduct.has(c.productId)) byProduct.set(c.productId, []);
-    byProduct.get(c.productId).push(c);
-  }
-  await Promise.all(
-    [...byProduct.entries()].map(([pid, lines]) =>
-      updateItemAtomic(pid, (curr) => {
-        if (!curr) return curr; // product deleted meanwhile — nothing to decrement
-        let p = normalizeProduct(curr);
-        for (const l of lines) p = applyVariantDelta(p, l.variantId, -Math.abs(Number(l.qty) || 0));
-        p.updatedAt = todayStr();
-        p.version = (curr.version || 0) + 1;
-        return p;
-      })
-    )
-  );
-}
+// NOTE: stock changes caused by a BILL (sale / edit / delete) do not use the helpers above. They
+// travel in the same outbox op as the bill itself (lib/ops.js recordSaleOp / amendSaleOp /
+// voidSaleOp → lib/sync.js sendOp), so the bill and its stock change are retried and replayed
+// together and a replay can never apply the stock change twice.
 
 function StoreManager({ user, onLogout }) {
   const [tab, setTab] = useState("dashboard");
   const [otherOpen, setOtherOpen] = useState(false);
-  const [items, setItems] = useState([]);
+  // `rawItems` = products exactly as last received from the cloud (or the local cache).
+  // `items` (below) = what every screen sees: rawItems + stock changes still in the outbox.
+  const [rawItems, setItems] = useState([]);
+  const [pendingOps, setPendingOps] = useState([]); // outbox: writes not yet acked by the server
   const [sales, setSales] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [logs, setLogs] = useState([]);
@@ -677,32 +668,103 @@ function StoreManager({ user, onLogout }) {
   });
   const seeded = useRef(false);
   const [online, setOnline] = useState(true);
+  const items = useMemo(() => overlayPendingStock(rawItems, pendingOps), [rawItems, pendingOps]);
 
-  // Always-current local state, readable from inside async listeners (for the merge).
-  const dataRef = useRef({ items, sales, expenses, logs, vendorBills: bills, dailyBills });
-  dataRef.current = { items, sales, expenses, logs, vendorBills: bills, dailyBills };
+  // Always-current local state, readable from inside async listeners (for the merge) and by
+  // the cache writer. `items` here is the RAW cloud view — pending stock is re-overlaid from the
+  // outbox on every load, so caching the overlaid numbers would count it twice.
+  const dataRef = useRef({});
+  dataRef.current = { items: rawItems, sales, expenses, logs, vendorBills: bills, dailyBills };
   const notifyRef = useRef(null);
+  const localDb = useRef(null); // IndexedDB handle (cache + outbox)
+  const cacheWriter = useRef(null);
+  const outboxRef = useRef(null);
+  const pendingRef = useRef([]); // same as pendingOps, readable synchronously in listeners
+  const legacyCache = useRef(false); // true until the old localStorage cache has been moved over
+  const lastSyncWarn = useRef(0);
 
-  // 1) Instant paint from the local cache.
+  // 1) Open the device database, load the offline cache and the outbox, and paint from them.
+  //    Pending (un-acked) writes from a previous session are re-applied on top of the cache
+  //    here and on every cloud snapshot below, so a bill made offline — or in the instant before
+  //    the tab was closed — is never dropped; the outbox replays it to the cloud.
   useEffect(() => {
-    try {
-      const c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
-      if (c) {
-        setItems(c.items || []);
-        setSales(c.sales || []);
-        setExpenses(c.expenses || []);
-        setLogs(c.logs || []);
-        setBills(c.vendorBills || []);
-        setDailyBills(c.dailyBills || []);
+    let dead = false;
+    let outbox = null;
+    (async () => {
+      const ldb = await openLocalDb();
+      if (dead) return ldb.close();
+      localDb.current = ldb;
+      const writer = createCacheWriter(ldb);
+      cacheWriter.current = writer;
+      let cache = {};
+      try {
+        cache = await ldb.loadCache();
+      } catch (e) {
+        console.error("cache read failed", e);
       }
-    } catch (e) {
-      console.error("cache read failed", e);
-    }
-    setLoaded(true);
+      // One-time move from the old single-key localStorage cache (pre-IndexedDB versions).
+      if (!Object.keys(cache).length) {
+        try {
+          const c = JSON.parse(localStorage.getItem(CACHE_KEY) || "null");
+          if (c && typeof c === "object") {
+            cache = c;
+            legacyCache.current = true;
+          }
+        } catch (e) {
+          console.error("legacy cache read failed", e);
+        }
+      }
+      outbox = createOutbox({
+        store: ldb,
+        send: (op) => sendOp(op, { today: todayStr() }),
+        onChange: (ops) => {
+          pendingRef.current = ops;
+          setPendingOps(ops);
+        },
+        onError: (op, err) => {
+          console.error("sync write failed", op.label || "", err);
+          if (Date.now() - lastSyncWarn.current > 30000) {
+            lastSyncWarn.current = Date.now();
+            notifyRef.current?.(
+              "⚠ Couldn't sync to cloud — saved on this device, will keep retrying."
+            );
+          }
+        },
+      });
+      const pending = await outbox.start();
+      if (dead) return;
+      outboxRef.current = outbox;
+      const init = {};
+      for (const slice of SLICES) {
+        const arr = Array.isArray(cache[slice]) ? cache[slice] : [];
+        if (!legacyCache.current) writer.prime(slice, arr);
+        let map = toMap(arr);
+        if (slice !== "items") {
+          map = applyOpsToMap(slice, map, pending);
+          lastRemote.current[slice] = map; // base for the local-change diff until the cloud answers
+        }
+        init[slice] = mapToArray(slice, map);
+      }
+      setItems(init.items);
+      setSales(init.sales);
+      setExpenses(init.expenses);
+      setLogs(init.logs);
+      setBills(init.vendorBills);
+      setDailyBills(init.dailyBills);
+      setLoaded(true);
+    })();
+    return () => {
+      dead = true;
+      if (outbox) outbox.stop();
+      outboxRef.current = null;
+      if (localDb.current) localDb.current.close();
+      localDb.current = null;
+    };
   }, []);
 
   // 2) Subscribe to the cloud; changes from any device flow in live.
   useEffect(() => {
+    if (!loaded) return; // the cache + outbox must be in place before the first merge
     const slices = [
       ["items", setItems],
       ["sales", setSales],
@@ -748,20 +810,34 @@ function StoreManager({ user, onLogout }) {
               });
             return;
           }
-          const theirs = toMap(val);
+          const cloud = toMap(val);
           // One-time migration of legacy array / numeric-keyed data → keyed-by-id map.
-          if (isLegacyShape(val, theirs)) {
-            overwriteSlice(slice, theirs).catch((e) => console.error("migrate failed", slice, e));
+          if (isLegacyShape(val, cloud)) {
+            overwriteSlice(slice, cloud).catch((e) => console.error("migrate failed", slice, e));
           }
           const base = lastRemote.current[slice];
           const wasSynced = synced.current[slice];
-          lastRemote.current[slice] = theirs;
           synced.current[slice] = true;
+          if (slice === "items") {
+            // Products are only ever written by transactions; pending stock is overlaid at
+            // render time (see `items`), so the raw state simply follows the cloud.
+            lastRemote.current.items = cloud;
+            setter((curr) =>
+              mapToArray(slice, wasSynced ? mergeRemote(base, cloud, toMap(curr)) : cloud)
+            );
+            return;
+          }
+          // What the cloud says, plus every write of ours it has not acknowledged yet. This
+          // holds for the FIRST snapshot after a reload too — which is what keeps a bill that
+          // only exists in the outbox from being discarded.
+          const pend = pendingRef.current;
+          const theirs = applyOpsToMap(slice, cloud, pend);
+          lastRemote.current[slice] = theirs;
           // Merge against the TRUE current state via the functional updater — NOT a ref that
           // may lag a just-dispatched local edit by a render. This is what stops an incoming
           // snapshot from silently reverting an edit/restock/delete made a moment earlier.
           setter((curr) =>
-            mapToArray(slice, wasSynced ? mergeRemote(base, theirs, toMap(curr)) : theirs)
+            mapToArray(slice, applyOpsToMap(slice, mergeRemote(base, theirs, toMap(curr)), pend))
           );
         },
         (err) => {
@@ -770,80 +846,118 @@ function StoreManager({ user, onLogout }) {
         }
       )
     );
-    const unsubConn = subscribeConnection(setOnline);
+    const unsubConn = subscribeConnection((up) => {
+      setOnline(up);
+      if (up) outboxRef.current?.retryNow(); // back online → retry anything that failed
+    });
     return () => {
       unsubs.forEach((u) => u());
       unsubConn();
     };
-  }, []);
+  }, [loaded]);
 
-  // 3) Push field-level deltas to the cloud when a slice changes locally (after the first
-  //    cloud snapshot). buildSliceUpdate skips no-op echoes, so this is loop-safe.
+  // 3) When a slice changes locally, turn the difference from the last-known cloud state into
+  //    an outbox op (field-level deltas). The outbox persists it to IndexedDB, sends it, retries
+  //    it on failure and replays it after a reload. buildSliceUpdate skips no-op echoes, so
+  //    this is loop-safe. There is deliberately no debounce: a change is queued durably the
+  //    moment it is made, not 300 ms later.
   const pushSlice = useCallback((slice, value) => {
-    if (!synced.current[slice]) return; // don't write before we've read the cloud once
+    const outbox = outboxRef.current;
+    if (!outbox) return;
     const { updates, nextMap, changed } = buildSliceUpdate(lastRemote.current[slice], value);
     if (!changed) return;
     lastRemote.current[slice] = nextMap; // optimistic; the echo snapshot confirms it
-    writeSlice(slice, updates).catch((e) => {
-      console.error("sync write failed", slice, e);
-      notify("⚠ Couldn't sync to cloud — saved on this device, will retry when back online.");
-    });
+    const patch = {};
+    for (const k of Object.keys(updates)) patch[slice + "/" + k] = updates[k];
+    outbox.enqueue({ id: uid(), patch, label: slice });
   }, []);
   // NOTE: the `items` (products) slice is intentionally NOT delta-pushed here. All product
-  // writes go through Firebase transactions (cloudWriteProduct / cloudSellCart / …) so that
-  // concurrent stock changes from two devices can never silently overwrite each other. Local
-  // product state is updated purely by the onValue echo — Firebase applies local writes to its
-  // cache immediately, so the UI stays instant (and works offline within a session).
+  // writes go through Firebase transactions (cloudWriteProduct / sendOp stock deltas / …) so
+  // that concurrent stock changes from two devices can never silently overwrite each other.
   useEffect(() => {
-    if (!loaded) return;
-    const t = setTimeout(() => pushSlice("sales", sales), 300);
-    return () => clearTimeout(t);
+    if (loaded) pushSlice("sales", sales);
   }, [sales, loaded, pushSlice]);
   useEffect(() => {
-    if (!loaded) return;
-    const t = setTimeout(() => pushSlice("expenses", expenses), 300);
-    return () => clearTimeout(t);
+    if (loaded) pushSlice("expenses", expenses);
   }, [expenses, loaded, pushSlice]);
   useEffect(() => {
-    if (!loaded) return;
-    const t = setTimeout(() => pushSlice("logs", logs), 300);
-    return () => clearTimeout(t);
+    if (loaded) pushSlice("logs", logs);
   }, [logs, loaded, pushSlice]);
   useEffect(() => {
-    if (!loaded) return;
-    const t = setTimeout(() => pushSlice("vendorBills", bills), 300);
-    return () => clearTimeout(t);
+    if (loaded) pushSlice("vendorBills", bills);
   }, [bills, loaded, pushSlice]);
   useEffect(() => {
-    if (!loaded) return;
-    const t = setTimeout(() => pushSlice("dailyBills", dailyBills), 300);
-    return () => clearTimeout(t);
+    if (loaded) pushSlice("dailyBills", dailyBills);
   }, [dailyBills, loaded, pushSlice]);
 
-  // 4) Mirror to a local cache (instant next paint + offline reads + no data loss on close).
+  // Bill operations. Each one is a SINGLE outbox op carrying the bill change and its stock
+  // change together (lib/ops.js), applied to local state immediately so the counter never waits
+  // on the network. `lastRemote` is advanced in the same breath so the generic diff above does
+  // not queue the same change a second time.
+  const commitSaleOp = useCallback((parts, label) => {
+    lastRemote.current.sales = applyPatchToMap("sales", lastRemote.current.sales, parts.patch);
+    outboxRef.current?.enqueue({ id: uid(), ...parts, label });
+  }, []);
+  const recordSale = useCallback(
+    (sale) => {
+      const parts = recordSaleOp(sale);
+      commitSaleOp(parts, "sale");
+      const saved = parts.patch["sales/" + sale.id];
+      setSales((all) => [...all.filter((x) => x.id !== sale.id), saved]);
+    },
+    [commitSaleOp]
+  );
+  const amendSale = useCallback(
+    (prev, next) => {
+      const parts = amendSaleOp(prev, next);
+      commitSaleOp(parts, "sale-edit");
+      setSales((all) =>
+        all.map((x) =>
+          x.id === next.id ? applyPatchToMap("sales", { [x.id]: x }, parts.patch)[x.id] : x
+        )
+      );
+    },
+    [commitSaleOp]
+  );
+  const voidSale = useCallback(
+    (sale) => {
+      commitSaleOp(voidSaleOp(sale), "sale-delete");
+      setSales((all) => all.filter((x) => x.id !== sale.id));
+    },
+    [commitSaleOp]
+  );
+
+  // 4) Mirror to the device cache (instant next paint + offline reads). IndexedDB, one entry
+  //    per record, only changed records are written — so there is no size ceiling and a single
+  //    new bill costs a single small write. Nothing here is needed for durability of unsynced
+  //    work: that is the outbox's job.
   useEffect(() => {
     if (!loaded) return;
     const writeCache = () => {
-      try {
-        localStorage.setItem(CACHE_KEY, JSON.stringify(dataRef.current));
-      } catch (e) {
-        console.error("cache write failed", e);
-      }
+      const writer = cacheWriter.current;
+      if (!writer) return;
+      const data = dataRef.current;
+      Promise.all(SLICES.map((slice) => writer.write(slice, data[slice])))
+        .then(() => {
+          if (legacyCache.current) {
+            legacyCache.current = false;
+            localStorage.removeItem(CACHE_KEY); // now safely in IndexedDB
+          }
+        })
+        .catch((e) => console.error("cache write failed", e));
     };
     const t = setTimeout(writeCache, 400);
     const onHide = () => {
       if (document.visibilityState === "hidden") writeCache();
     };
-    window.addEventListener("beforeunload", writeCache);
     window.addEventListener("pagehide", writeCache);
     document.addEventListener("visibilitychange", onHide);
     return () => {
       clearTimeout(t);
-      window.removeEventListener("beforeunload", writeCache);
       window.removeEventListener("pagehide", writeCache);
       document.removeEventListener("visibilitychange", onHide);
     };
-  }, [items, sales, expenses, logs, bills, dailyBills, loaded]);
+  }, [rawItems, sales, expenses, logs, bills, dailyBills, loaded]);
 
   const toastTimer = useRef(null);
   const notify = (msg) => {
@@ -866,6 +980,38 @@ function StoreManager({ user, onLogout }) {
     }
   }, [customCats]);
   const cats = useMemo(() => subcatList(items, customCats), [items, customCats]);
+
+  // Share owner-added subcategories across devices at shop/meta/customSubcats/<key> = "Name".
+  // Cloud values are merged into the local list; local values the cloud does not have yet
+  // (including everything added on this device before this feature existed) are pushed up once.
+  const [cloudCats, setCloudCats] = useState(null); // null until the first snapshot
+  const pushedCats = useRef(new Set());
+  useEffect(() => {
+    if (!loaded) return;
+    return subscribeCustomSubcats(setCloudCats, (err) =>
+      console.error("custom subcategory read failed", err)
+    );
+  }, [loaded]);
+  useEffect(() => {
+    if (!cloudCats) return;
+    const have = new Set(cloudCats.map((c) => c.toLowerCase()));
+    const local = new Set(customCats.map((c) => c.toLowerCase()));
+    const incoming = cloudCats.filter((c) => !local.has(c.toLowerCase()));
+    if (incoming.length)
+      setCustomCats((cs) => {
+        const seen = new Set(cs.map((c) => c.toLowerCase()));
+        return [...cs, ...incoming.filter((c) => !seen.has(c.toLowerCase()))];
+      });
+    const patch = {};
+    for (const c of customCats) {
+      const k = c.toLowerCase();
+      if (have.has(k) || pushedCats.current.has(k)) continue;
+      pushedCats.current.add(k);
+      patch[CUSTOM_SUBCATS_PATH + "/" + subcatKey(c)] = c;
+    }
+    if (Object.keys(patch).length)
+      outboxRef.current?.enqueue({ id: uid(), patch, label: "subcategories" });
+  }, [cloudCats, customCats]);
 
   // Prompt for and add a new subcategory. Returns the canonical name to select (existing match if
   // it's a duplicate, the new name otherwise), or null if cancelled/blank. Used by the Add/Edit forms.
@@ -1135,8 +1281,21 @@ function StoreManager({ user, onLogout }) {
                   display: "inline-block",
                 }}
               />
-              {online ? "Online · syncing live" : "Offline · saved on this device"}
+              {online
+                ? "Online · syncing live"
+                : pendingOps.length
+                  ? `Offline · ${pendingOps.length} change${pendingOps.length === 1 ? "" : "s"} waiting to sync`
+                  : "Offline · saved on this device"}
             </span>
+            {online && pendingOps.some((o) => o.error) && (
+              <button
+                className="navbtn"
+                style={{ border: "1px solid #C9803A", color: "#F2C48D", margin: "2px 0 4px" }}
+                onClick={() => outboxRef.current?.retryNow()}
+              >
+                ⚠ {pendingOps.filter((o) => o.error).length} not synced — tap to retry
+              </button>
+            )}
             <br />
             {user?.email ? (
               <>
@@ -1159,7 +1318,14 @@ function StoreManager({ user, onLogout }) {
               goBilling={() => setTab("billing")}
             />
           ) : tab === "billing" ? (
-            <Billing items={items} sales={sales} setSales={setSales} notify={notify} log={addLog} />
+            <Billing
+              items={items}
+              sales={sales}
+              recordSale={recordSale}
+              online={online}
+              notify={notify}
+              log={addLog}
+            />
           ) : tab === "raw" ? (
             <RawData
               items={items}
@@ -1183,6 +1349,8 @@ function StoreManager({ user, onLogout }) {
               sales={sales}
               items={items}
               setSales={setSales}
+              amendSale={amendSale}
+              voidSale={voidSale}
               notify={notify}
               log={addLog}
             />
@@ -1932,7 +2100,7 @@ function Dashboard({ items, sales, lowStock, goBilling }) {
 }
 
 // ---------- Billing / POS ----------
-function Billing({ items, sales, setSales, notify, log }) {
+function Billing({ items, sales, recordSale, online, notify, log }) {
   const config = useShopConfig();
   const [q, setQ] = useState("");
   const [cart, setCart] = useState([]); // [{ key, productId, variantId, name, brand, icon, size, color, sellingPrice, purchasePrice, category, subcategory, qty, misc? }]
@@ -1952,6 +2120,14 @@ function Billing({ items, sales, setSales, notify, log }) {
   const [custFocus, setCustFocus] = useState(false);
   const searchRef = useRef(null);
   useEffect(() => searchRef.current?.focus(), []);
+  // Double-tap guard: a cart can be turned into a bill exactly once. `soldCart` remembers the
+  // cart array that was just saved, so a second tap that arrives before React has re-rendered
+  // the (now empty) cart is ignored; `saving` also disables the button for that moment.
+  const soldCart = useRef(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (saving) setSaving(false);
+  }, [saving]);
 
   // Unique past customers (name + most-recent mobile) for the name autocomplete.
   const knownCustomers = useMemo(() => {
@@ -2133,8 +2309,8 @@ function Billing({ items, sales, setSales, notify, log }) {
   const total = money(subtotal - discountAmt);
   const profit = money(grossProfit - discountAmt);
 
-  const completeSale = async () => {
-    if (cart.length === 0) return;
+  const completeSale = () => {
+    if (cart.length === 0 || soldCart.current === cart) return;
     // Re-check against the freshest variant stock (another device may have sold since).
     const short = cart
       .filter((c) => !c.misc)
@@ -2185,14 +2361,12 @@ function Billing({ items, sales, setSales, notify, log }) {
       ...(pay === "Udhari" ? { paid: Math.min(total, Math.max(0, money(+paidNow || 0))) } : {}),
       ...(pay === "Udhari" && +paidNow > 0 ? { paidMode } : {}),
     };
-    setSales((s) => [...s, sale]);
-    // Atomic per-product stock decrement (concurrency-safe). Local stock refreshes via the echo.
-    try {
-      await cloudSellCart(cart);
-    } catch (e) {
-      console.error("stock update failed", e);
-      notify("⚠ Sale saved, but stock update didn't sync — check connection.");
-    }
+    // One outbox op = the bill + its stock decrement. It is recorded on this device at once and
+    // delivered (and retried / replayed) in the background, so the counter never waits on the
+    // network — online or offline.
+    soldCart.current = cart;
+    setSaving(true);
+    recordSale(sale);
     setLastSale(sale);
     log(
       "sale",
@@ -2209,7 +2383,11 @@ function Billing({ items, sales, setSales, notify, log }) {
     setPaidMode("Cash");
     setDiscount("");
     searchRef.current?.focus();
-    notify(`Bill saved (${pay}) — ` + INR(total));
+    notify(
+      online
+        ? `Bill saved (${pay}) — ` + INR(total)
+        : `Saved on this device (${pay}) — ${INR(total)} · will sync when online`
+    );
   };
 
   return (
@@ -2605,7 +2783,7 @@ function Billing({ items, sales, setSales, notify, log }) {
           <button
             className="btn primary big"
             style={{ width: "100%" }}
-            disabled={cart.length === 0}
+            disabled={cart.length === 0 || saving}
             onClick={completeSale}
           >
             Complete sale · {INR(total)}
@@ -4054,7 +4232,7 @@ function RawData({ items, setSales, setExpenses, notify, log }) {
 // ---------- Sales history ----------
 const PAY_COLORS = { UPI: "#2A6FB0", Cash: "#1B5E43", Udhari: "#C44536" };
 
-function SalesHistory({ sales, items, setSales, notify, log }) {
+function SalesHistory({ sales, items, setSales, amendSale, voidSale, notify, log }) {
   const config = useShopConfig();
   const [open, setOpen] = useState(null);
   const [openDates, setOpenDates] = useState(() => new Set()); // expanded past dates (today is always open)
@@ -4105,29 +4283,14 @@ function SalesHistory({ sales, items, setSales, notify, log }) {
   }, [visible]);
   const rangeTotal = money(visible.reduce((a, s) => a + s.total, 0));
 
-  // Adjust variant stock by per-(product,variant) SOLD-quantity deltas via atomic transactions
-  // (positive delta = sold more → remove stock; negative = sold less/undone → add back).
-  // Keyed "productId|variantId". Lines without a productId (misc, or legacy) touch no stock.
-  const applyDeltas = (deltas) => {
-    Object.entries(deltas).forEach(([key, delta]) => {
-      if (!delta) return;
-      const [pid, vid] = key.split("|");
-      if (!pid || !vid) return;
-      cloudAdjustVariant(pid, vid, -delta).catch((e) => console.error("stock adjust failed", e));
-    });
-  };
-  const lineKey = (l) => (l.misc || !l.productId ? "" : l.productId + "|" + l.variantId);
-
+  // Bill edits and deletes go through amendSale / voidSale (StoreManager): the bill change and
+  // the per-variant stock correction are ONE outbox op, so they cannot drift apart, failures
+  // are surfaced and retried, and a replay never adjusts stock twice. Lines without a
+  // productId (misc, or legacy) touch no stock.
   const deleteSale = (s) => {
     if (!confirm(`Delete this ${INR(s.total)} bill from ${s.date}? Stock will be added back.`))
       return;
-    const deltas = {};
-    s.lines.forEach((l) => {
-      const k = lineKey(l);
-      if (k) deltas[k] = (deltas[k] || 0) - l.qty;
-    });
-    applyDeltas(deltas);
-    setSales((all) => all.filter((x) => x.id !== s.id));
+    voidSale(s);
     log("sale", `Deleted bill ${INR(s.total)} (${s.date}) — stock restored`);
     notify("Bill deleted, stock restored");
   };
@@ -4174,59 +4337,44 @@ function SalesHistory({ sales, items, setSales, notify, log }) {
     const profit = money(
       newLines.reduce((a, l) => a + (l.price - buyOf(l)) * l.qty, 0) - discountAmt
     );
-    const oldQ = {},
-      newQ = {};
-    // Reconcile stock per (product, variant). Misc / legacy lines have no key → skipped.
-    editing.orig.forEach((l) => {
-      const k = lineKey(l);
-      if (k) oldQ[k] = (oldQ[k] || 0) + l.qty;
-    });
-    newLines.forEach((l) => {
-      const k = lineKey(l);
-      if (k) newQ[k] = (newQ[k] || 0) + l.qty;
-    });
-    const deltas = {};
-    [...new Set([...Object.keys(oldQ), ...Object.keys(newQ)])].forEach((k) => {
-      const d = (newQ[k] || 0) - (oldQ[k] || 0);
-      if (d) deltas[k] = d;
-    });
-    applyDeltas(deltas);
     const paid =
       editing.payment === "Udhari"
         ? Math.min(total, Math.max(0, money(+editing.paid || 0)))
         : undefined;
-    setSales((all) =>
-      all.map((x) => {
-        if (x.id !== editing.id) return x;
-        const next = {
-          ...x,
-          date: editing.date || x.date,
-          payment: editing.payment,
-          lines: newLines,
-          total,
-          profit,
-        };
-        // A % discount, once edited, is stored as its plain ₹ value — drop the stale percent tag.
-        if (discountAmt > 0) {
-          next.subtotal = gross;
-          next.discount = discountAmt;
-          delete next.discountPct;
-        } else {
-          delete next.subtotal;
-          delete next.discount;
-          delete next.discountPct;
-        }
-        if (editing.payment === "Udhari") {
-          next.paid = paid;
-          if (paid > 0) next.paidMode = editing.paidMode;
-          else delete next.paidMode;
-        } else {
-          delete next.paid;
-          delete next.paidMode;
-        }
-        return next;
-      })
-    );
+    const prev = sales.find((x) => x.id === editing.id);
+    if (!prev) {
+      setEditing(null);
+      return notify("That bill no longer exists.");
+    }
+    const next = {
+      ...prev,
+      date: editing.date || prev.date,
+      payment: editing.payment,
+      lines: newLines,
+      total,
+      profit,
+    };
+    // A % discount, once edited, is stored as its plain ₹ value — drop the stale percent tag.
+    if (discountAmt > 0) {
+      next.subtotal = gross;
+      next.discount = discountAmt;
+      delete next.discountPct;
+    } else {
+      delete next.subtotal;
+      delete next.discount;
+      delete next.discountPct;
+    }
+    if (editing.payment === "Udhari") {
+      next.paid = paid;
+      if (paid > 0) next.paidMode = editing.paidMode;
+      else delete next.paidMode;
+    } else {
+      delete next.paid;
+      delete next.paidMode;
+    }
+    // Stock is reconciled per (product, variant) from the ORIGINAL lines of the stored bill to
+    // the new lines, inside the same op as the bill change.
+    amendSale(prev, next);
     log("sale", `Edited bill → ${INR(total)} · ${newLines.length} line(s) · ${editing.payment}`);
     setEditing(null);
     notify("Bill updated");
