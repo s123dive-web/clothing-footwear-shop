@@ -54,7 +54,7 @@ export const Header = ({ title, sub, children }) => (
   <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 18, gap: 12 }}>
     <div>
       <h1 style={{ margin: 0, fontSize: 24, letterSpacing: "-0.03em" }}>{title}</h1>
-      {sub && <div style={{ color: "#6B7E74", fontSize: 13, marginTop: 2 }}>{sub}</div>}
+      {sub && <div style={{ color: "#556A5F", fontSize: 13, marginTop: 2 }}>{sub}</div>}
     </div>
     <div style={{ marginLeft: "auto" }}>{children}</div>
   </div>
@@ -67,7 +67,7 @@ export const Card = ({ label, value, sub, accent }) => (
         fontSize: 11.5,
         textTransform: "uppercase",
         letterSpacing: "0.07em",
-        color: accent ? "#A8CDBA" : "#7A8C81",
+        color: accent ? "#C6E3D4" : "#5A6E63",
       }}
     >
       {label}
@@ -82,7 +82,7 @@ export const Card = ({ label, value, sub, accent }) => (
     >
       {value}
     </div>
-    <div style={{ fontSize: 12, color: accent ? "#C8E2D4" : "#8A9C90" }}>{sub}</div>
+    <div style={{ fontSize: 12, color: accent ? "#C8E2D4" : "#5C6E63" }}>{sub}</div>
   </div>
 );
 
@@ -94,7 +94,7 @@ export const Field = ({ label, children }) => (
 );
 
 export const Empty = ({ text, children }) => (
-  <div style={{ padding: "22px 10px", textAlign: "center", color: "#8A9", fontSize: 13 }}>
+  <div style={{ padding: "22px 10px", textAlign: "center", color: "#5A6E63", fontSize: 13 }}>
     {text}
     {children && <div style={{ marginTop: 10 }}>{children}</div>}
   </div>

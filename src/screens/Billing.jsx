@@ -402,7 +402,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
         <label
           style={{
             fontSize: 12,
-            color: saleDate === todayStr() ? "#6B7E74" : "#C44536",
+            color: saleDate === todayStr() ? "#556A5F" : "#C44536",
             fontWeight: 600,
           }}
         >
@@ -427,6 +427,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           <input
             ref={searchRef}
             className="input"
+            aria-label="Search name / brand / code"
             placeholder="Search name / brand / code… (Enter opens top match)"
             value={q}
             onChange={(e) => setQ(e.target.value)}
@@ -453,6 +454,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
             <input
               className="input"
               style={{ flex: 1, minWidth: 0 }}
+              aria-label="Name (optional)"
               placeholder="Name (optional)"
               value={miscName}
               onChange={(e) => setMiscName(e.target.value)}
@@ -468,6 +470,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               inputMode="decimal"
               min="0"
               step="0.01"
+              aria-label="buy"
               placeholder="buy"
               value={miscBuy}
               onChange={(e) => setMiscBuy(e.target.value)}
@@ -484,6 +487,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               inputMode="decimal"
               min="0"
               step="0.01"
+              aria-label="sell"
               placeholder="sell"
               value={miscPrice}
               onChange={(e) => setMiscPrice(e.target.value)}
@@ -500,7 +504,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
             <div className="quick-row" aria-label="Recent and best sellers">
               {quickPicks.map((i) => (
                 <button key={i.id} className="quick" onClick={() => openProduct(i)}>
-                  <span style={{ color: "#B77B00" }}>★</span> {i.name}
+                  <span style={{ color: "#8A5A00" }}>★</span> {i.name}
                   <span style={{ color: "#6A5560", fontWeight: 600 }}>
                     {" "}
                     · {INR(i.sellingPrice)}
@@ -548,14 +552,14 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
                     {i.name}
                     {soldQty[i.name] ? (
                       <span
-                        style={{ color: "#E8A33D", fontSize: 11, marginLeft: 4 }}
+                        style={{ color: "#8A5A00", fontSize: 11, marginLeft: 4 }}
                         title="best-seller"
                       >
                         ★
                       </span>
                     ) : null}
                   </div>
-                  <div style={{ fontSize: 11, color: "#9AA", marginTop: 1 }}>
+                  <div style={{ fontSize: 11, color: "#5F6B6B", marginTop: 1 }}>
                     {[i.brand, i.subcategory].filter(Boolean).join(" · ")}
                   </div>
                   <div
@@ -569,7 +573,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
                     <span style={{ color: "#8E2C48", fontWeight: 800 }}>{INR(i.sellingPrice)}</span>
                     <span
                       style={{
-                        color: !inStock || low ? "#C44536" : "#789",
+                        color: !inStock || low ? "#C44536" : "#586878",
                         fontWeight: !inStock ? 600 : 400,
                       }}
                     >
@@ -645,7 +649,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
                     >
                       {c.icon} {c.name}
                     </div>
-                    <div style={{ fontSize: 11, color: "#9AA" }}>
+                    <div style={{ fontSize: 11, color: "#5F6B6B" }}>
                       {[variantLabel(c) !== "—" ? variantLabel(c) : "", INR(c.sellingPrice)]
                         .filter(Boolean)
                         .join(" · ")}
@@ -702,6 +706,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               inputMode="decimal"
               min="0"
               step="0.01"
+              aria-label="0"
               placeholder="0"
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
@@ -743,7 +748,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
                   display: "flex",
                   justifyContent: "space-between",
                   fontSize: 13,
-                  color: "#789",
+                  color: "#586878",
                 }}
               >
                 <span>Subtotal</span>
@@ -816,7 +821,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
                     }}
                   >
                     {c.name}
-                    {c.mobile ? <span style={{ color: "#9AA" }}> · {c.mobile}</span> : ""}
+                    {c.mobile ? <span style={{ color: "#5F6B6B" }}> · {c.mobile}</span> : ""}
                   </div>
                 ))}
               </div>
@@ -825,6 +830,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           <input
             className="input"
             style={{ marginBottom: 8 }}
+            aria-label="Mobile (optional)"
             placeholder="Mobile (optional)"
             value={mobile}
             onChange={(e) => setMobile(e.target.value)}
@@ -839,6 +845,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
                 type="number"
                 inputMode="decimal"
                 min="0"
+                aria-label="Paid now (optional)"
                 placeholder="Paid now (optional)"
                 value={paidNow}
                 onChange={(e) => setPaidNow(e.target.value)}
@@ -869,7 +876,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               the total and the Complete button are always reachable without scrolling. */}
           <div className="bill-bar">
             <div className="bill-bar-total">
-              <span style={{ fontSize: 11.5, color: "#6B7E74" }}>
+              <span style={{ fontSize: 11.5, color: "#556A5F" }}>
                 {cart.reduce((a, c) => a + c.qty, 0)} item
                 {cart.reduce((a, c) => a + c.qty, 0) === 1 ? "" : "s"} · {pay}
               </span>
@@ -900,7 +907,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       {/* variant picker modal */}
       {picker && (
         <Modal title={`${picker.name} — pick size & colour`} onClose={() => setPicker(null)}>
-          <div style={{ fontSize: 12.5, color: "#8A9C90", marginBottom: 10 }}>
+          <div style={{ fontSize: 12.5, color: "#5C6E63", marginBottom: 10 }}>
             {[picker.brand, picker.subcategory].filter(Boolean).join(" · ")} ·{" "}
             {INR(picker.sellingPrice)}
           </div>

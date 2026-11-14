@@ -20,7 +20,7 @@ export const BILL_CATEGORIES = [
   "Other",
 ];
 export const BILL_STATUS = ["unpaid", "partial", "paid"];
-export const STATUS_COLORS = { paid: "#1B5E43", partial: "#B0762A", unpaid: "#C44536" };
+export const STATUS_COLORS = { paid: "#1B5E43", partial: "#8A5A12", unpaid: "#C44536" };
 export const isImageType = (t, name) =>
   /^image\//i.test(t || "") || /\.(jpe?g|png|webp|gif|bmp|heic)$/i.test(name || "");
 export const outstandingOf = (b) =>
@@ -361,7 +361,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
             (() => {
               const cur = bills.find((b) => b.id === editId);
               return cur?.fileURL ? (
-                <div style={{ fontSize: 11.5, color: "#6B7E74", marginTop: -6, marginBottom: 6 }}>
+                <div style={{ fontSize: 11.5, color: "#556A5F", marginTop: -6, marginBottom: 6 }}>
                   Current proof:{" "}
                   <a href={cur.fileURL} target="_blank" rel="noopener noreferrer">
                     {cur.fileName || "view"}
@@ -370,7 +370,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                 </div>
               ) : null;
             })()}
-          <div style={{ fontSize: 11, color: "#8A9C90", marginBottom: 10 }}>
+          <div style={{ fontSize: 11, color: "#5C6E63", marginBottom: 10 }}>
             JPG/PNG/PDF/DOC/XLS… up to 10 MB. Stored securely in the cloud.
           </div>
           {err && (
@@ -436,7 +436,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
               marginBottom: 12,
             }}
           >
-            <label style={{ fontSize: 12, color: "#6B7E74" }}>
+            <label style={{ fontSize: 12, color: "#556A5F" }}>
               From{" "}
               <input
                 type="date"
@@ -447,7 +447,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                 onChange={(e) => setFrom(e.target.value)}
               />
             </label>
-            <label style={{ fontSize: 12, color: "#6B7E74" }}>
+            <label style={{ fontSize: 12, color: "#556A5F" }}>
               To{" "}
               <input
                 type="date"
@@ -458,7 +458,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                 onChange={(e) => setTo(e.target.value)}
               />
             </label>
-            <label style={{ fontSize: 12, color: "#6B7E74" }}>
+            <label style={{ fontSize: 12, color: "#556A5F" }}>
               Month{" "}
               <input
                 type="month"
@@ -471,6 +471,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
             <select
               className="input"
               style={{ width: "auto" }}
+              aria-label="Filter by status"
               value={statusF}
               onChange={(e) => setStatusF(e.target.value)}
             >
@@ -484,6 +485,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
             <select
               className="input"
               style={{ width: "auto" }}
+              aria-label="Filter by category"
               value={catF}
               onChange={(e) => setCatF(e.target.value)}
             >
@@ -495,6 +497,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
             <input
               className="input"
               style={{ flex: 1, minWidth: 120 }}
+              aria-label="Search vendor"
               placeholder="Search vendor…"
               value={vq}
               onChange={(e) => setVq(e.target.value)}
@@ -555,7 +558,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                   const out = outstandingOf(b);
                   return (
                     <tr key={b.id}>
-                      <td style={{ whiteSpace: "nowrap", color: "#677" }}>{fmtDate(b.date)}</td>
+                      <td style={{ whiteSpace: "nowrap", color: "#566" }}>{fmtDate(b.date)}</td>
                       <td style={{ fontWeight: 600 }}>
                         {b.vendor}
                         {b.source === "daily-need" && (
@@ -567,7 +570,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                               fontWeight: 800,
                               textTransform: "uppercase",
                               letterSpacing: ".03em",
-                              color: "#0E7C86",
+                              color: "#0B6770",
                               border: "1px solid #9FD3D8",
                               background: "#EAF7F8",
                               borderRadius: 6,
@@ -579,7 +582,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                           </span>
                         )}
                       </td>
-                      <td style={{ color: "#677", fontSize: 12.5 }}>{b.category || "—"}</td>
+                      <td style={{ color: "#566", fontSize: 12.5 }}>{b.category || "—"}</td>
                       <td style={{ textAlign: "right", fontWeight: 700 }}>{INR(b.amount)}</td>
                       <td style={{ whiteSpace: "nowrap" }}>
                         <span
@@ -587,7 +590,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
                             fontSize: 10.5,
                             fontWeight: 800,
                             textTransform: "uppercase",
-                            color: STATUS_COLORS[b.status] || "#789",
+                            color: STATUS_COLORS[b.status] || "#586878",
                             border: `1px solid ${STATUS_COLORS[b.status] || "#bbb"}`,
                             borderRadius: 6,
                             padding: "0 6px",
@@ -676,7 +679,7 @@ export function VendorBills({ bills, setBills, setDailyBills, goDailyBills, onli
               />
               <YAxis tick={{ fontSize: 11, fill: "#678" }} tickFormatter={inrTick} width={48} />
               <Tooltip formatter={(v) => INR(v)} />
-              <Bar dataKey="amount" name="Spend" fill="#0E7C86" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="amount" name="Spend" fill="#0B6770" radius={[3, 3, 0, 0]} />
             </BarChart>
           </ChartCard>
           <ChartCard title="Top vendors by spend">

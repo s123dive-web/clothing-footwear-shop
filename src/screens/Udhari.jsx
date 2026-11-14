@@ -203,7 +203,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
               fontWeight: 500,
               textTransform: "none",
               letterSpacing: 0,
-              color: "#8A9C90",
+              color: "#5C6E63",
               marginLeft: 8,
             }}
           >
@@ -240,9 +240,9 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
                 return (
                   <Fragment key={c.name}>
                     <tr onClick={() => toggle(c.name)} style={{ cursor: "pointer" }}>
-                      <td style={{ color: "#8A9C90" }}>{isOpen ? "▾" : "▸"}</td>
+                      <td style={{ color: "#5C6E63" }}>{isOpen ? "▾" : "▸"}</td>
                       <td style={{ fontWeight: 600 }}>{c.name}</td>
-                      <td style={{ color: "#677" }}>{c.mobile || "—"}</td>
+                      <td style={{ color: "#566" }}>{c.mobile || "—"}</td>
                       <td style={{ textAlign: "right" }}>{c.bills}</td>
                       <td style={{ textAlign: "right", fontWeight: 700, color: "#C44536" }}>
                         {INR(c.outstanding)}
@@ -271,7 +271,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
                             >
                               <td></td>
                               <td colSpan={3} style={{ fontSize: 12.5, color: "#566" }}>
-                                <span style={{ color: "#8A9C90", marginRight: 4 }}>
+                                <span style={{ color: "#5C6E63", marginRight: 4 }}>
                                   {billOpen ? "▾" : "▸"}
                                 </span>
                                 {b.date}
@@ -309,7 +309,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
                                     }}
                                   >
                                     {nLines === 0 ? (
-                                      <div style={{ fontSize: 12.5, color: "#8A9C90" }}>
+                                      <div style={{ fontSize: 12.5, color: "#5C6E63" }}>
                                         No line items on this bill.
                                       </div>
                                     ) : (
@@ -357,7 +357,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
             </tbody>
           </table>
         )}
-        <div style={{ fontSize: 11.5, color: "#8A9C90", marginTop: 8 }}>
+        <div style={{ fontSize: 11.5, color: "#5C6E63", marginTop: 8 }}>
           Tap a customer to see their bills, then Pay a full or part repayment (Cash / UPI). Sales
           History updates automatically.
         </div>
@@ -371,7 +371,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
               fontWeight: 500,
               textTransform: "none",
               letterSpacing: 0,
-              color: "#8A9C90",
+              color: "#5C6E63",
               marginLeft: 8,
             }}
           >
@@ -382,7 +382,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
               marginLeft: "auto",
               fontWeight: 500,
               fontSize: 12,
-              color: "#8A9C90",
+              color: "#5C6E63",
               textTransform: "none",
               letterSpacing: 0,
             }}
@@ -407,9 +407,9 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
             <tbody>
               {history.events.slice(0, 150).map((e) => (
                 <tr key={e.id}>
-                  <td style={{ whiteSpace: "nowrap", color: "#677" }}>
+                  <td style={{ whiteSpace: "nowrap", color: "#566" }}>
                     {e.date}
-                    {e.time ? <span style={{ color: "#9AA" }}> {e.time}</span> : null}
+                    {e.time ? <span style={{ color: "#5F6B6B" }}> {e.time}</span> : null}
                   </td>
                   <td style={{ fontWeight: 600 }}>{e.who}</td>
                   <td>
@@ -450,7 +450,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
                   >
                     {e.kind === "credit" ? INR(e.amount) : "− " + INR(e.amount)}
                   </td>
-                  <td style={{ color: "#677", fontSize: 12 }}>
+                  <td style={{ color: "#566", fontSize: 12 }}>
                     {e.kind === "paid" ? (e.mode || "—") + (e.atStart ? " · at billing" : "") : "—"}
                   </td>
                 </tr>
@@ -459,7 +459,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
           </table>
         )}
         {history.events.length > 150 && (
-          <div style={{ fontSize: 11.5, color: "#8A9C90", marginTop: 8 }}>
+          <div style={{ fontSize: 11.5, color: "#5C6E63", marginTop: 8 }}>
             Showing the most recent 150 of {history.events.length} events.
           </div>
         )}
@@ -504,7 +504,7 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
               </div>
             </Field>
             <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontSize: 12, color: "#6B7E74", fontWeight: 600 }}>Paid via</span>
+              <span style={{ fontSize: 12, color: "#556A5F", fontWeight: 600 }}>Paid via</span>
               {["Cash", "UPI"].map((m) => (
                 <button
                   key={m}

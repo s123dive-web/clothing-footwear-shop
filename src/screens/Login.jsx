@@ -90,7 +90,7 @@ export function Login() {
             <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>
               {cfg.name}
             </div>
-            <div style={{ fontSize: 11.5, color: "#8A9C90" }}>{cfg.address || cfg.tagline}</div>
+            <div style={{ fontSize: 11.5, color: "#5C6E63" }}>{cfg.address || cfg.tagline}</div>
           </div>
         </div>
         <h2 style={{ fontSize: 16, margin: "18px 0 12px" }}>Sign in</h2>
@@ -127,14 +127,16 @@ export function Login() {
             border: "none",
             color: "#1B5E43",
             fontSize: 12,
-            marginTop: 10,
+            marginTop: 4,
             cursor: "pointer",
-            padding: 0,
+            padding: "0 4px",
+            minHeight: 44,
+            textAlign: "left",
           }}
         >
           Forgot password? Email me a reset link
         </button>
-        <div style={{ fontSize: 11, color: "#8A9C90", marginTop: 12, lineHeight: 1.5 }}>
+        <div style={{ fontSize: 11, color: "#5C6E63", marginTop: 12, lineHeight: 1.5 }}>
           Sign in with your shop account. Your data syncs live across every device that signs in.
         </div>
       </form>

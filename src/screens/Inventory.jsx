@@ -55,7 +55,7 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) 
           <div style={{ fontWeight: 800, fontSize: 15 }}>
             {i.name} {low && <span style={S.badgeInline}>low</span>}
           </div>
-          <div style={{ fontSize: 12, color: "#8A9C90", marginTop: 1 }}>
+          <div style={{ fontSize: 12, color: "#5C6E63", marginTop: 1 }}>
             {[i.brand, i.category, i.subcategory].filter(Boolean).join(" · ")}
             {i.code ? ` · #${i.code}` : ""}
           </div>
@@ -74,7 +74,7 @@ const ProductRow = memo(function ProductRow({ i, onRestock, onEdit, onDelete }) 
             {INR(i.sellingPrice)}
           </div>
           {Number(i.mrp) > Number(i.sellingPrice) && (
-            <div style={{ fontSize: 11.5, color: "#9AA", textDecoration: "line-through" }}>
+            <div style={{ fontSize: 11.5, color: "#5F6B6B", textDecoration: "line-through" }}>
               MRP {INR(i.mrp)}
             </div>
           )}
@@ -234,6 +234,7 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         <input
           className="input"
           style={{ flex: "1 1 220px", minWidth: 0 }}
+          aria-label="Search name / brand / code"
           placeholder="Search name / brand / code…"
           value={q}
           onChange={(e) => setQ(e.target.value)}
@@ -262,6 +263,7 @@ export function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddC
         <select
           className="input"
           style={{ width: "auto" }}
+          aria-label="Filter by subcategory"
           value={sub}
           onChange={(e) => setSub(e.target.value)}
         >
@@ -353,7 +355,9 @@ export function RestockModal({ product, onRestock, onClose }) {
               <div style={{ flex: 1 }}>
                 <ColorDot color={v.color} />
                 {variantLabel(v)}{" "}
-                <span style={{ color: "#9AA", fontSize: 12 }}>· {Number(v.stockQty) || 0} now</span>
+                <span style={{ color: "#5F6B6B", fontSize: 12 }}>
+                  · {Number(v.stockQty) || 0} now
+                </span>
               </div>
               <input
                 className="input"
@@ -361,6 +365,7 @@ export function RestockModal({ product, onRestock, onClose }) {
                 type="number"
                 inputMode="decimal"
                 min="1"
+                aria-label="qty"
                 placeholder="+ qty"
                 value={qty[v.id] || ""}
                 onChange={(e) => setQty((s) => ({ ...s, [v.id]: e.target.value }))}
@@ -643,7 +648,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           Quick-add variants (size × colour)
         </div>
         <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: 11, color: "#889", marginBottom: 3 }}>Sizes</div>
+          <div style={{ fontSize: 11, color: "#5E5E72", marginBottom: 3 }}>Sizes</div>
           {sizeOptions.map((sz) => (
             <button
               key={sz}
@@ -655,7 +660,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           ))}
         </div>
         <div style={{ marginBottom: 6 }}>
-          <div style={{ fontSize: 11, color: "#889", marginBottom: 3 }}>Colours</div>
+          <div style={{ fontSize: 11, color: "#5E5E72", marginBottom: 3 }}>Colours</div>
           {COLOR_SWATCHES.slice(0, 12).map((c) => (
             <button
               key={c.name}
@@ -669,6 +674,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
           <input
             className="input"
             style={{ width: 160, marginTop: 6, display: "inline-block" }}
+            aria-label="Other colours, comma-sep"
             placeholder="Other colours, comma-sep"
             value={genColorText}
             onChange={(e) => setGenColorText(e.target.value)}
@@ -688,7 +694,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
       >
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
           <thead>
-            <tr style={{ background: "#FAF6F8", textAlign: "left", color: "#889" }}>
+            <tr style={{ background: "#FAF6F8", textAlign: "left", color: "#5E5E72" }}>
               <th style={{ padding: "6px 8px" }}>Size</th>
               <th style={{ padding: "6px 8px" }}>Colour</th>
               <th style={{ padding: "6px 8px" }}>Stock</th>
@@ -703,6 +709,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                   <input
                     className="input"
                     style={{ padding: "5px 7px", width: 78 }}
+                    aria-label={"Size of variant " + (f.variants.indexOf(v) + 1)}
                     list={"sizes-" + f.category}
                     value={v.size}
                     onChange={(e) => setVar(v.id, "size", e.target.value)}
@@ -712,6 +719,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                   <input
                     className="input"
                     style={{ padding: "5px 7px", width: 96 }}
+                    aria-label={"Colour of variant " + (f.variants.indexOf(v) + 1)}
                     list="color-list"
                     value={v.color}
                     onChange={(e) => setVar(v.id, "color", e.target.value)}
@@ -724,6 +732,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                     type="number"
                     inputMode="decimal"
                     min="0"
+                    aria-label={"Stock of variant " + (f.variants.indexOf(v) + 1)}
                     value={v.stockQty}
                     onChange={(e) => setVar(v.id, "stockQty", e.target.value)}
                   />
@@ -735,6 +744,7 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
                     type="number"
                     inputMode="decimal"
                     min="0"
+                    aria-label={"Low-stock level of variant " + (f.variants.indexOf(v) + 1)}
                     value={v.lowAt}
                     onChange={(e) => setVar(v.id, "lowAt", e.target.value)}
                   />

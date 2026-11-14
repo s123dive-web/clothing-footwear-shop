@@ -13,7 +13,7 @@ export const LOG_COLORS = {
   expense: "#C44536",
   import: "#7A5AB0",
   backup: "#7A6A1E",
-  bill: "#0E7C86",
+  bill: "#0B6770",
 };
 
 export function Logs({ logs, setLogs, notify, goBilling }) {
@@ -54,7 +54,7 @@ export function Logs({ logs, setLogs, notify, goBilling }) {
       </Header>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
-        <label style={{ fontSize: 12, color: "#6B7E74" }}>
+        <label style={{ fontSize: 12, color: "#556A5F" }}>
           Day{" "}
           <input
             type="date"
@@ -68,6 +68,7 @@ export function Logs({ logs, setLogs, notify, goBilling }) {
         <select
           className="input"
           style={{ width: 180 }}
+          aria-label="Filter by activity type"
           value={type}
           onChange={(e) => setType(e.target.value)}
         >
@@ -130,8 +131,8 @@ export function Logs({ logs, setLogs, notify, goBilling }) {
             <tbody>
               {filtered.slice(0, limit).map((l) => (
                 <tr key={l.id}>
-                  <td style={{ whiteSpace: "nowrap", color: "#677" }}>
-                    {l.date} <span style={{ color: "#9AA" }}>{l.time}</span>
+                  <td style={{ whiteSpace: "nowrap", color: "#566" }}>
+                    {l.date} <span style={{ color: "#5F6B6B" }}>{l.time}</span>
                   </td>
                   <td>
                     <span

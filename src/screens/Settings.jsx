@@ -140,7 +140,7 @@ export function Settings({ config, onSave, notify }) {
                   background: "#F4F7F4",
                   display: "grid",
                   placeItems: "center",
-                  color: "#9AA",
+                  color: "#5F6B6B",
                   fontSize: 24,
                 }}
               >
@@ -156,7 +156,7 @@ export function Settings({ config, onSave, notify }) {
                 Remove
               </button>
             )}
-            <span style={{ fontSize: 12, color: "#8A9C90" }}>PNG/JPG under 250 KB.</span>
+            <span style={{ fontSize: 12, color: "#5C6E63" }}>PNG/JPG under 250 KB.</span>
           </div>
         </Section>
 

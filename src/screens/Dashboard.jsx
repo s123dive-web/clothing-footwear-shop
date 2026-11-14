@@ -70,7 +70,7 @@ export function Dashboard({
   return (
     <div>
       <Header title="Dashboard" sub={niceDate}>
-        <label style={{ fontSize: 12, color: "#6B7E74" }}>
+        <label style={{ fontSize: 12, color: "#556A5F" }}>
           View day{" "}
           <input
             type="date"
@@ -136,7 +136,7 @@ export function Dashboard({
                   <span>
                     {i.name}
                     {lows.length ? (
-                      <span style={{ color: "#9AA", fontSize: 11 }}>
+                      <span style={{ color: "#5F6B6B", fontSize: 11 }}>
                         {" "}
                         · {lows.map(variantLabel).slice(0, 3).join(", ")}
                       </span>

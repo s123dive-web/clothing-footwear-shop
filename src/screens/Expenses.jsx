@@ -71,7 +71,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
         sub="Record shop expenses — rent, electricity, supplies, salaries…"
       >
         <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-          <label style={{ fontSize: 12, color: showAll ? "#9AA" : "#6B7E74" }}>
+          <label style={{ fontSize: 12, color: showAll ? "#5F6B6B" : "#556A5F" }}>
             Month{" "}
             <input
               type="month"
@@ -143,7 +143,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                 fontWeight: 500,
                 textTransform: "none",
                 letterSpacing: 0,
-                color: "#8A9C90",
+                color: "#5C6E63",
                 marginLeft: 8,
               }}
             >
@@ -222,7 +222,7 @@ export function Expenses({ expenses, setExpenses, notify, log }) {
                     </tr>
                   ) : (
                     <tr key={e.id}>
-                      <td style={{ color: "#677", whiteSpace: "nowrap" }}>{e.date}</td>
+                      <td style={{ color: "#566", whiteSpace: "nowrap" }}>{e.date}</td>
                       <td>{e.desc}</td>
                       <td style={{ textAlign: "right", fontWeight: 700 }}>{INR(e.amount)}</td>
                       <td style={{ whiteSpace: "nowrap" }}>

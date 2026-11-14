@@ -966,7 +966,7 @@ function StoreManager({ user, onLogout }) {
             <div
               style={{
                 fontSize: 10.5,
-                color: "#6E8A7C",
+                color: "#9DB5A8",
                 textTransform: "uppercase",
                 letterSpacing: ".06em",
                 padding: "0 6px 4px",
@@ -1024,7 +1024,7 @@ function StoreManager({ user, onLogout }) {
               ⎋ Logout
             </button>
           </div>
-          <div style={{ fontSize: 11, color: "#6E8A7C", padding: "6px 14px 8px" }}>
+          <div style={{ fontSize: 11, color: "#9DB5A8", padding: "6px 14px 8px" }}>
             <span style={{ display: "inline-flex", alignItems: "center", gap: 5, marginBottom: 3 }}>
               <span
                 style={{
