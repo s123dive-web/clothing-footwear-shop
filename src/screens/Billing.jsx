@@ -1,0 +1,763 @@
+import { useShopConfig } from "../config/shopConfig.js";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { todayStr, money, uid, INR } from "../lib/format.js";
+import { productStock, variantLabel, isProductLow } from "../lib/products.js";
+import { iconFor } from "../lib/domain.js";
+import { Header, Empty, Modal } from "../ui/index.jsx";
+import { S } from "../ui/styles.js";
+import { CURRENCY } from "../config/currency.js";
+import { printReceipt } from "../lib/print.js";
+
+// ---------- Billing / POS ----------
+export function Billing({ items, sales, recordSale, online, notify, log }) {
+  const config = useShopConfig();
+  const [q, setQ] = useState("");
+  const [cart, setCart] = useState([]); // [{ key, productId, variantId, name, brand, icon, size, color, sellingPrice, purchasePrice, category, subcategory, qty, misc? }]
+  const [lastSale, setLastSale] = useState(null);
+  const [saleDate, setSaleDate] = useState(todayStr()); // back-date a bill if needed
+  const [pay, setPay] = useState("UPI"); // UPI | Cash | Udhari
+  const [customer, setCustomer] = useState("");
+  const [mobile, setMobile] = useState("");
+  const [paidNow, setPaidNow] = useState(""); // Udhari part-payment taken at billing time
+  const [paidMode, setPaidMode] = useState("Cash");
+  const [discount, setDiscount] = useState("");
+  const [discMode, setDiscMode] = useState("flat"); // "flat" = amount, "%" = percent of subtotal
+  const [picker, setPicker] = useState(null); // product whose size/colour variant picker is open
+  const [miscName, setMiscName] = useState("");
+  const [miscPrice, setMiscPrice] = useState("");
+  const [miscBuy, setMiscBuy] = useState("");
+  const [custFocus, setCustFocus] = useState(false);
+  const searchRef = useRef(null);
+  useEffect(() => searchRef.current?.focus(), []);
+  // Double-tap guard: a cart can be turned into a bill exactly once. `soldCart` remembers the
+  // cart array that was just saved, so a second tap that arrives before React has re-rendered
+  // the (now empty) cart is ignored; `saving` also disables the button for that moment.
+  const soldCart = useRef(null);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => {
+    if (saving) setSaving(false);
+  }, [saving]);
+
+  // Unique past customers (name + most-recent mobile) for the name autocomplete.
+  const knownCustomers = useMemo(() => {
+    const m = new Map();
+    sales.forEach((s) => {
+      const name = (s.customer || "").trim();
+      if (!name) return;
+      const key = name.toLowerCase();
+      const e = m.get(key) || { name, mobile: "" };
+      e.name = name;
+      if ((s.mobile || "").trim()) e.mobile = s.mobile.trim();
+      m.set(key, e);
+    });
+    return [...m.values()];
+  }, [sales]);
+  const custSuggestions = useMemo(() => {
+    const qq = customer.trim().toLowerCase();
+    if (!qq) return [];
+    return knownCustomers
+      .filter((c) => c.name.toLowerCase().includes(qq) && c.name.toLowerCase() !== qq)
+      .slice(0, 6);
+  }, [customer, knownCustomers]);
+
+  // Units sold / last-sold per product name — for the best-seller ★ and picker ordering.
+  const soldQty = useMemo(() => {
+    const m = {};
+    (sales || []).forEach((s) =>
+      (s.lines || []).forEach((l) => {
+        m[l.name] = (m[l.name] || 0) + l.qty;
+      })
+    );
+    return m;
+  }, [sales]);
+  const lastSold = useMemo(() => {
+    const m = {};
+    (sales || []).forEach((s) =>
+      (s.lines || []).forEach((l) => {
+        if (!m[l.name] || s.date > m[l.name]) m[l.name] = s.date;
+      })
+    );
+    return m;
+  }, [sales]);
+
+  const stockOf = (p) => productStock(p);
+
+  // Product picker results: sellable (any variant in stock) products first, then out-of-stock.
+  const results = useMemo(() => {
+    const s = q.trim().toLowerCase();
+    const matchesText = (i) =>
+      i.name.toLowerCase().includes(s) ||
+      (i.brand || "").toLowerCase().includes(s) ||
+      (i.code || "").toLowerCase().includes(s) ||
+      (i.subcategory || "").toLowerCase().includes(s) ||
+      (i.category || "").toLowerCase().includes(s);
+    const byActivity = (a, b) => {
+      const la = lastSold[a.name] || "",
+        lb = lastSold[b.name] || "";
+      if (la !== lb) return la < lb ? 1 : -1;
+      return (soldQty[b.name] || 0) - (soldQty[a.name] || 0);
+    };
+    const pool = s ? items.filter(matchesText) : items;
+    const inStock = pool.filter((i) => stockOf(i) > 0).sort(byActivity);
+    const out = pool.filter((i) => stockOf(i) <= 0).sort(byActivity);
+    return [...inStock.slice(0, 14), ...out.slice(0, 8)];
+  }, [q, items, soldQty, lastSold]);
+
+  // Live availability of a variant, minus what's already in the cart for it.
+  const variantAvail = (product, variant) => {
+    const inCart = cart
+      .filter((c) => c.productId === product.id && c.variantId === variant.id)
+      .reduce((a, c) => a + c.qty, 0);
+    return Math.max(0, (Number(variant.stockQty) || 0) - inCart);
+  };
+
+  const openProduct = (product) => {
+    const vs = product.variants || [];
+    if (stockOf(product) <= 0) return notify("Out of stock: " + product.name);
+    if (vs.length === 1) return addVariant(product, vs[0]);
+    setPicker(product);
+  };
+
+  const addVariant = (product, variant) => {
+    if ((Number(variant.stockQty) || 0) <= 0)
+      return notify(`${product.name} — ${variantLabel(variant)} is out of stock`);
+    if (variantAvail(product, variant) <= 0)
+      return notify(
+        `Only ${variant.stockQty} of ${product.name} (${variantLabel(variant)}) in stock`
+      );
+    const key = product.id + "|" + variant.id;
+    setCart((c) => {
+      const ex = c.find((x) => x.key === key);
+      if (ex) return c.map((x) => (x.key === key ? { ...x, qty: x.qty + 1 } : x));
+      return [
+        ...c,
+        {
+          key,
+          productId: product.id,
+          variantId: variant.id,
+          name: product.name,
+          brand: product.brand || "",
+          icon: iconFor(product),
+          size: variant.size || "",
+          color: variant.color || "",
+          sellingPrice: money(product.sellingPrice),
+          purchasePrice: money(product.purchasePrice),
+          category: product.category,
+          subcategory: product.subcategory,
+          qty: 1,
+        },
+      ];
+    });
+  };
+
+  const setQty = (key, qty) => {
+    const line = cart.find((c) => c.key === key);
+    let q2 = qty;
+    if (line && !line.misc) {
+      const p = items.find((i) => i.id === line.productId);
+      const v = p?.variants?.find((x) => x.id === line.variantId);
+      const stock = Number(v?.stockQty) || 0;
+      if (q2 > stock) {
+        notify(`Only ${stock} in stock`);
+        q2 = stock;
+      }
+    }
+    setCart((c) =>
+      q2 <= 0
+        ? c.filter((x) => x.key !== key)
+        : c.map((x) => (x.key === key ? { ...x, qty: q2 } : x))
+    );
+  };
+
+  const addMisc = () => {
+    const price = +miscPrice;
+    if (!(price > 0)) return notify("Enter a price for the misc item.");
+    const buy = +miscBuy;
+    if (miscBuy.trim() !== "" && !(buy >= 0))
+      return notify("Enter a valid buy price (or leave it blank).");
+    const name = miscName.trim() || "Misc item";
+    setCart((c) => [
+      ...c,
+      {
+        key: "misc-" + uid(),
+        misc: true,
+        name,
+        icon: "🧾",
+        size: "",
+        color: "",
+        sellingPrice: money(price),
+        purchasePrice: money(buy > 0 ? buy : 0),
+        qty: 1,
+        category: "",
+        subcategory: "Misc",
+      },
+    ]);
+    setMiscName("");
+    setMiscPrice("");
+    setMiscBuy("");
+    notify(`Added “${name}” · ${INR(money(price))}`);
+  };
+
+  const onSearchKey = (e) => {
+    if (e.key !== "Enter" || results.length === 0) return;
+    const code = q.trim().toLowerCase();
+    const exact = results.find((i) => (i.code || "").toLowerCase() === code && code);
+    openProduct(exact || results[0]);
+    setQ("");
+  };
+
+  const subtotal = money(cart.reduce((a, c) => a + c.sellingPrice * c.qty, 0));
+  const grossProfit = money(
+    cart.reduce((a, c) => a + (c.sellingPrice - c.purchasePrice) * c.qty, 0)
+  );
+  const discNum = Math.max(0, +discount || 0);
+  const discountAmt =
+    discMode === "%"
+      ? money((subtotal * Math.min(100, discNum)) / 100)
+      : Math.min(subtotal, money(discNum));
+  const total = money(subtotal - discountAmt);
+  const profit = money(grossProfit - discountAmt);
+
+  const completeSale = () => {
+    if (cart.length === 0 || soldCart.current === cart) return;
+    // Re-check against the freshest variant stock (another device may have sold since).
+    const short = cart
+      .filter((c) => !c.misc)
+      .map((c) => {
+        const p = items.find((i) => i.id === c.productId);
+        const v = p?.variants?.find((x) => x.id === c.variantId);
+        return { c, stock: Number(v?.stockQty) || 0 };
+      })
+      .filter(({ c, stock }) => c.qty > stock);
+    if (short.length) {
+      const { c, stock } = short[0];
+      return notify(`Only ${stock} of ${c.name} (${variantLabel(c)}) left — adjust the bill.`);
+    }
+    const now = new Date();
+    const backDated = saleDate !== todayStr();
+    const sale = {
+      id: uid(),
+      date: saleDate,
+      time:
+        now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }) +
+        (backDated ? " (back-dated)" : ""),
+      // Snapshot the cost (buyPrice) onto each line so historical profit stays anchored even if
+      // prices change or the product is deleted later. Size/colour/category ride along for reports.
+      lines: cart.map((c) => ({
+        name: c.name,
+        qty: c.qty,
+        price: c.sellingPrice,
+        buyPrice: c.purchasePrice,
+        amount: money(c.sellingPrice * c.qty),
+        size: c.size || "",
+        color: c.color || "",
+        category: c.category || "",
+        subcategory: c.subcategory || "",
+        ...(c.misc ? { misc: true } : { productId: c.productId, variantId: c.variantId }),
+      })),
+      total,
+      profit,
+      ...(discountAmt > 0
+        ? {
+            subtotal,
+            discount: discountAmt,
+            ...(discMode === "%" ? { discountPct: money(discNum) } : {}),
+          }
+        : {}),
+      payment: pay,
+      ...(customer.trim() ? { customer: customer.trim() } : {}),
+      ...(mobile.trim() ? { mobile: mobile.trim() } : {}),
+      ...(pay === "Udhari" ? { paid: Math.min(total, Math.max(0, money(+paidNow || 0))) } : {}),
+      ...(pay === "Udhari" && +paidNow > 0 ? { paidMode } : {}),
+    };
+    // One outbox op = the bill + its stock decrement. It is recorded on this device at once and
+    // delivered (and retried / replayed) in the background, so the counter never waits on the
+    // network — online or offline.
+    soldCart.current = cart;
+    setSaving(true);
+    recordSale(sale);
+    setLastSale(sale);
+    log(
+      "sale",
+      `Bill ${INR(total)} · ${cart.length} item(s) · ${pay}` +
+        (discountAmt > 0 ? ` · disc ${INR(discountAmt)}` : "") +
+        (customer.trim() ? ` (${customer.trim()})` : "") +
+        (backDated ? ` · back-dated to ${saleDate}` : "")
+    );
+    setCart([]);
+    setQ("");
+    setCustomer("");
+    setMobile("");
+    setPaidNow("");
+    setPaidMode("Cash");
+    setDiscount("");
+    searchRef.current?.focus();
+    notify(
+      online
+        ? `Bill saved (${pay}) — ` + INR(total)
+        : `Saved on this device (${pay}) — ${INR(total)} · will sync when online`
+    );
+  };
+
+  return (
+    <div>
+      <Header title="Billing" sub="Tap a product, pick size &amp; colour, add to the bill">
+        <label
+          style={{
+            fontSize: 12,
+            color: saleDate === todayStr() ? "#6B7E74" : "#C44536",
+            fontWeight: 600,
+          }}
+        >
+          Bill date{" "}
+          <input
+            type="date"
+            className="input"
+            style={{ width: "auto", marginLeft: 4 }}
+            value={saleDate}
+            max={todayStr()}
+            onChange={(e) => setSaleDate(e.target.value || todayStr())}
+          />
+        </label>
+      </Header>
+
+      <div
+        className="billing-grid"
+        style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 16 }}
+      >
+        {/* product picker */}
+        <section style={S.panel}>
+          <input
+            ref={searchRef}
+            className="input"
+            placeholder="Search name / brand / code… (Enter opens top match)"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            onKeyDown={onSearchKey}
+            aria-label="Search products or scan barcode"
+            style={{ marginBottom: 12 }}
+          />
+          <div
+            style={{
+              display: "flex",
+              gap: 6,
+              alignItems: "center",
+              marginBottom: 12,
+              padding: "8px 10px",
+              background: "#F7F2F4",
+              borderRadius: 8,
+            }}
+          >
+            <span
+              style={{ fontSize: 11.5, fontWeight: 700, color: "#8E2C48", whiteSpace: "nowrap" }}
+            >
+              🧾 Misc
+            </span>
+            <input
+              className="input"
+              style={{ flex: 1, minWidth: 0 }}
+              placeholder="Name (optional)"
+              value={miscName}
+              onChange={(e) => setMiscName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addMisc();
+              }}
+              aria-label="Misc item name"
+            />
+            <input
+              className="input"
+              style={{ width: 78 }}
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="buy"
+              value={miscBuy}
+              onChange={(e) => setMiscBuy(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addMisc();
+              }}
+              aria-label="Misc buy price (optional)"
+              title="Buy / cost price (optional) — used for profit"
+            />
+            <input
+              className="input"
+              style={{ width: 86 }}
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="sell"
+              value={miscPrice}
+              onChange={(e) => setMiscPrice(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") addMisc();
+              }}
+              aria-label="Misc sell price"
+            />
+            <button className="btn" onClick={addMisc}>
+              + Add
+            </button>
+          </div>
+          <div
+            className="pick-grid"
+            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}
+          >
+            {results.length === 0 && (
+              <Empty text={q ? "No products match." : "No products yet — add some in Inventory."} />
+            )}
+            {results.map((i) => {
+              const st = stockOf(i);
+              const inStock = st > 0;
+              const low = isProductLow(i);
+              return (
+                <div
+                  key={i.id}
+                  className="pick"
+                  style={{
+                    cursor: inStock ? "pointer" : "default",
+                    background: inStock ? undefined : "#F2F0F1",
+                    opacity: inStock ? 1 : 0.7,
+                  }}
+                  onClick={inStock ? () => openProduct(i) : undefined}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>
+                    <span style={{ marginRight: 5 }}>{iconFor(i)}</span>
+                    {i.name}
+                    {soldQty[i.name] ? (
+                      <span
+                        style={{ color: "#E8A33D", fontSize: 11, marginLeft: 4 }}
+                        title="best-seller"
+                      >
+                        ★
+                      </span>
+                    ) : null}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#9AA", marginTop: 1 }}>
+                    {[i.brand, i.subcategory].filter(Boolean).join(" · ")}
+                  </div>
+                  <div
+                    style={{
+                      display: "flex",
+                      justifyContent: "space-between",
+                      marginTop: 4,
+                      fontSize: 12.5,
+                    }}
+                  >
+                    <span style={{ color: "#8E2C48", fontWeight: 800 }}>{INR(i.sellingPrice)}</span>
+                    <span
+                      style={{
+                        color: !inStock || low ? "#C44536" : "#789",
+                        fontWeight: !inStock ? 600 : 400,
+                      }}
+                    >
+                      {!inStock ? "Out of stock" : st + " in stock"}
+                    </span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* cart / bill */}
+        <section style={S.panel}>
+          <div style={S.panelHead}>Current bill</div>
+          {cart.length === 0 ? (
+            <Empty text="No items yet. Tap a product to begin." />
+          ) : (
+            <div style={{ marginBottom: 10 }}>
+              {cart.map((c) => (
+                <div
+                  key={c.key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    padding: "7px 0",
+                    borderBottom: "1px dotted #E7DDE2",
+                  }}
+                >
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontSize: 13,
+                        fontWeight: 600,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {c.icon} {c.name}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#9AA" }}>
+                      {[variantLabel(c) !== "—" ? variantLabel(c) : "", INR(c.sellingPrice)]
+                        .filter(Boolean)
+                        .join(" · ")}
+                    </div>
+                  </div>
+                  <input
+                    className="input"
+                    style={{ width: 56, padding: "5px 6px" }}
+                    type="number"
+                    min="0"
+                    value={c.qty}
+                    onChange={(e) => setQty(c.key, Math.floor(+e.target.value || 0))}
+                    aria-label={"Quantity for " + c.name}
+                  />
+                  <div style={{ width: 68, textAlign: "right", fontWeight: 700, fontSize: 13 }}>
+                    {INR(c.sellingPrice * c.qty)}
+                  </div>
+                  <button
+                    className="btn ghost small"
+                    aria-label={"Remove " + c.name}
+                    onClick={() => setQty(c.key, 0)}
+                  >
+                    ✕
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* discount */}
+          <div style={{ display: "flex", gap: 6, alignItems: "center", margin: "8px 0" }}>
+            <span style={{ fontSize: 12, color: "#465", fontWeight: 600 }}>Discount</span>
+            <input
+              className="input"
+              style={{ width: 80, padding: "6px 8px" }}
+              type="number"
+              min="0"
+              step="0.01"
+              placeholder="0"
+              value={discount}
+              onChange={(e) => setDiscount(e.target.value)}
+              aria-label="Discount amount"
+            />
+            <div
+              style={{
+                display: "flex",
+                border: "1.5px solid #D5D0D2",
+                borderRadius: 8,
+                overflow: "hidden",
+              }}
+            >
+              <button
+                className={"seg" + (discMode === "flat" ? " on" : "")}
+                onClick={() => setDiscMode("flat")}
+              >
+                {CURRENCY.symbol}
+              </button>
+              <button
+                className={"seg" + (discMode === "%" ? " on" : "")}
+                onClick={() => setDiscMode("%")}
+              >
+                %
+              </button>
+            </div>
+            {discountAmt > 0 && (
+              <span style={{ fontSize: 12, color: "#C44536", marginLeft: "auto" }}>
+                − {INR(discountAmt)}
+              </span>
+            )}
+          </div>
+
+          {/* totals */}
+          <div style={{ borderTop: "2px dashed #E1D4DA", paddingTop: 10, marginTop: 4 }}>
+            {discountAmt > 0 && (
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  fontSize: 13,
+                  color: "#789",
+                }}
+              >
+                <span>Subtotal</span>
+                <span>{INR(subtotal)}</span>
+              </div>
+            )}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "space-between",
+                fontWeight: 800,
+                fontSize: 20,
+                margin: "4px 0",
+              }}
+            >
+              <span>Total</span>
+              <span>{INR(total)}</span>
+            </div>
+          </div>
+
+          {/* payment */}
+          <div style={{ display: "flex", gap: 6, margin: "10px 0" }}>
+            {["UPI", "Cash", "Udhari"].map((p) => (
+              <button
+                key={p}
+                className={"seg wide" + (pay === p ? " on" : "")}
+                onClick={() => setPay(p)}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+
+          {/* customer (optional; required-ish for Udhari) */}
+          <div style={{ position: "relative", marginBottom: 8 }}>
+            <input
+              className="input"
+              placeholder={
+                pay === "Udhari"
+                  ? "Customer name (for the credit book)"
+                  : "Customer name (optional)"
+              }
+              value={customer}
+              onChange={(e) => setCustomer(e.target.value)}
+              onFocus={() => setCustFocus(true)}
+              onBlur={() => setTimeout(() => setCustFocus(false), 150)}
+              aria-label="Customer name"
+            />
+            {custFocus && custSuggestions.length > 0 && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "100%",
+                  left: 0,
+                  right: 0,
+                  background: "#fff",
+                  border: "1px solid #E3E9E5",
+                  borderRadius: 8,
+                  zIndex: 5,
+                  boxShadow: "0 6px 18px rgba(0,0,0,.1)",
+                }}
+              >
+                {custSuggestions.map((c) => (
+                  <div
+                    key={c.name}
+                    style={{ padding: "8px 10px", fontSize: 13, cursor: "pointer" }}
+                    onMouseDown={() => {
+                      setCustomer(c.name);
+                      if (c.mobile) setMobile(c.mobile);
+                    }}
+                  >
+                    {c.name}
+                    {c.mobile ? <span style={{ color: "#9AA" }}> · {c.mobile}</span> : ""}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+          <input
+            className="input"
+            style={{ marginBottom: 8 }}
+            placeholder="Mobile (optional)"
+            value={mobile}
+            onChange={(e) => setMobile(e.target.value)}
+            aria-label="Customer mobile"
+          />
+
+          {pay === "Udhari" && (
+            <div style={{ display: "flex", gap: 6, alignItems: "center", marginBottom: 8 }}>
+              <input
+                className="input"
+                style={{ flex: 1 }}
+                type="number"
+                min="0"
+                placeholder="Paid now (optional)"
+                value={paidNow}
+                onChange={(e) => setPaidNow(e.target.value)}
+                aria-label="Amount paid now"
+              />
+              <div
+                style={{
+                  display: "flex",
+                  border: "1.5px solid #D5D0D2",
+                  borderRadius: 8,
+                  overflow: "hidden",
+                }}
+              >
+                {["Cash", "UPI"].map((m) => (
+                  <button
+                    key={m}
+                    className={"seg" + (paidMode === m ? " on" : "")}
+                    onClick={() => setPaidMode(m)}
+                  >
+                    {m}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <button
+            className="btn primary big"
+            style={{ width: "100%" }}
+            disabled={cart.length === 0 || saving}
+            onClick={completeSale}
+          >
+            Complete sale · {INR(total)}
+          </button>
+          {lastSale && (
+            <button
+              className="btn"
+              style={{ width: "100%", marginTop: 8 }}
+              onClick={() => printReceipt(lastSale, config)}
+            >
+              🧾 Print last receipt
+            </button>
+          )}
+        </section>
+      </div>
+
+      {/* variant picker modal */}
+      {picker && (
+        <Modal title={`${picker.name} — pick size & colour`} onClose={() => setPicker(null)}>
+          <div style={{ fontSize: 12.5, color: "#8A9C90", marginBottom: 10 }}>
+            {[picker.brand, picker.subcategory].filter(Boolean).join(" · ")} ·{" "}
+            {INR(picker.sellingPrice)}
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fill, minmax(120px, 1fr))",
+              gap: 8,
+            }}
+          >
+            {(picker.variants || []).map((v) => {
+              const avail = variantAvail(picker, v);
+              const can = avail > 0;
+              return (
+                <button
+                  key={v.id}
+                  disabled={!can}
+                  onClick={() => {
+                    addVariant(picker, v);
+                  }}
+                  style={{
+                    textAlign: "left",
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    border: "1.5px solid " + (can ? "#D9C7CF" : "#EEE"),
+                    background: can ? "#fff" : "#F5F3F4",
+                    cursor: can ? "pointer" : "not-allowed",
+                    opacity: can ? 1 : 0.6,
+                  }}
+                >
+                  <div style={{ fontWeight: 700, fontSize: 13.5 }}>{variantLabel(v)}</div>
+                  <div style={{ fontSize: 11.5, color: can ? "#2E7D5B" : "#C44536", marginTop: 2 }}>
+                    {can ? avail + " available" : "Out of stock"}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop: 12, textAlign: "right" }}>
+            <button className="btn primary" onClick={() => setPicker(null)}>
+              Done
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
