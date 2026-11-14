@@ -11,9 +11,9 @@
 // private (see firebase.example.js and the README for the setup steps).
 // ---------------------------------------------------------------------------
 import { initializeApp } from "firebase/app";
-import { getAuth } from "firebase/auth";
-import { getDatabase } from "firebase/database";
-import { getStorage } from "firebase/storage";
+import { getAuth, connectAuthEmulator } from "firebase/auth";
+import { getDatabase, connectDatabaseEmulator } from "firebase/database";
+import { getStorage, connectStorageEmulator } from "firebase/storage";
 
 // For Firebase JS SDK v7.20.0 and later, measurementId is optional
 export const firebaseConfig = {
@@ -45,7 +45,40 @@ let auth = null;
 let db = null;
 let storage = null;
 
-if (isFirebaseConfigured) {
+// ---------------------------------------------------------------------------
+// Emulator switch (dev / automated tests ONLY — never the live shop).
+//
+// On when BOTH hold:  VITE_FIREBASE_EMULATOR=1  (set by .env.emulator, i.e. `vite --mode
+// emulator`)  AND  this is not a production build. `vite build` always sets
+// import.meta.env.PROD, so a deployed bundle can never point at an emulator, and — the other
+// way round — an emulator session can never reach production: it is initialised with a
+// throw-away `demo-` project config (Firebase treats `demo-*` projects as offline-only) and
+// the real `firebaseConfig` above is not used at all.
+// ---------------------------------------------------------------------------
+const env = import.meta.env || {};
+export const USE_EMULATOR = env.VITE_FIREBASE_EMULATOR === "1" && !env.PROD;
+export const EMULATOR_PROJECT = "demo-cfs-shop";
+const EMULATOR_HOST = "127.0.0.1";
+const EMULATOR_PORTS = { auth: 9099, database: 9000, storage: 9199 }; // keep in sync with firebase.json
+
+if (isFirebaseConfigured && USE_EMULATOR) {
+  app = initializeApp({
+    apiKey: "demo-api-key",
+    authDomain: `${EMULATOR_PROJECT}.firebaseapp.com`,
+    databaseURL: `http://${EMULATOR_HOST}:${EMULATOR_PORTS.database}?ns=${EMULATOR_PROJECT}-default-rtdb`,
+    projectId: EMULATOR_PROJECT,
+    storageBucket: `${EMULATOR_PROJECT}.appspot.com`,
+  });
+  auth = getAuth(app);
+  db = getDatabase(app);
+  storage = getStorage(app);
+  connectAuthEmulator(auth, `http://${EMULATOR_HOST}:${EMULATOR_PORTS.auth}`, {
+    disableWarnings: true,
+  });
+  connectDatabaseEmulator(db, EMULATOR_HOST, EMULATOR_PORTS.database);
+  connectStorageEmulator(storage, EMULATOR_HOST, EMULATOR_PORTS.storage);
+  console.info("[firebase] using LOCAL EMULATOR — project", EMULATOR_PROJECT);
+} else if (isFirebaseConfigured) {
   app = initializeApp(firebaseConfig);
   auth = getAuth(app);
   db = getDatabase(app);

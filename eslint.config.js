@@ -4,7 +4,7 @@ import reactHooks from "eslint-plugin-react-hooks";
 import globals from "globals";
 
 export default [
-  { ignores: ["dist/", "node_modules/"] },
+  { ignores: ["dist/", "node_modules/", "playwright-report/", "test-results/"] },
   js.configs.recommended,
   {
     files: ["**/*.{js,jsx}"],
@@ -23,5 +23,10 @@ export default [
       "react/react-in-jsx-scope": "off",
       "no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
     },
+  },
+  {
+    // Playwright specs + tool configs run in Node (the specs also pass callbacks to the browser).
+    files: ["e2e/**/*.js", "playwright.config.js", "vite.config.js"],
+    languageOptions: { globals: { ...globals.node, ...globals.browser } },
   },
 ];
