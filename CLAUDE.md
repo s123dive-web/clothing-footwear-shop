@@ -120,7 +120,10 @@ Three device-side pieces, all in `src/lib/`:
   record, key `slice\0id`), `outbox`, `kv`. Falls back to an in-memory store if IndexedDB is
   unavailable (`durable: false`). `createCacheWriter` writes only records that changed.
 - **`outbox.js`** — durable queue of cloud writes. An op is persisted **before** it is sent
-  (write-ahead) and removed only on server ack; failed ops stay queued, are reported, retried
+  (write-ahead): first synchronously to a small localStorage journal
+  (`cfs-outbox-journal-v1`, ops > 200 kB skipped), then to IndexedDB, after which the journal
+  entry is dropped; `start()` recovers journalled ops IndexedDB never got. Removed only on
+  server ack; failed ops stay queued, are reported, retried
   with backoff and on reconnect; everything still queued is replayed on the next start.
   Delivery is at-least-once, so every op must be idempotent.
 - **`ops.js`** — pure helpers. An op is `{ id, seq, at, label, patch?, stock? }`:
