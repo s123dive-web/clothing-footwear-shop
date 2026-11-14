@@ -2,6 +2,7 @@ import { COLOR_SWATCHES } from "../lib/catalog.js";
 import { variantLabel } from "../lib/products.js";
 import { S } from "./styles.js";
 import { useRef, useEffect } from "react";
+import { useLang } from "../i18n/index.jsx";
 
 // A colour swatch dot for the variant chips / pickers.
 export const ColorDot = ({ color }) => {
@@ -50,15 +51,22 @@ export const VariantChip = ({ v }) => {
   );
 };
 
-export const Header = ({ title, sub, children }) => (
-  <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 18, gap: 12 }}>
-    <div>
-      <h1 style={{ margin: 0, fontSize: 24, letterSpacing: "-0.03em" }}>{title}</h1>
-      {sub && <div style={{ color: "#556A5F", fontSize: 13, marginTop: 2 }}>{sub}</div>}
+// `title`, `sub` and Empty's `text` are looked up in the strings table when they are plain
+// strings, so screens get translated titles without each one calling t().
+const tr = (t, v) => (typeof v === "string" ? t(v) : v);
+
+export const Header = ({ title, sub, children }) => {
+  const { t } = useLang();
+  return (
+    <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 18, gap: 12 }}>
+      <div>
+        <h1 style={{ margin: 0, fontSize: 24, letterSpacing: "-0.03em" }}>{tr(t, title)}</h1>
+        {sub && <div style={{ color: "#556A5F", fontSize: 13, marginTop: 2 }}>{tr(t, sub)}</div>}
+      </div>
+      <div style={{ marginLeft: "auto" }}>{children}</div>
     </div>
-    <div style={{ marginLeft: "auto" }}>{children}</div>
-  </div>
-);
+  );
+};
 
 export const Card = ({ label, value, sub, accent }) => (
   <div style={{ ...S.card, ...(accent ? { background: "#1B5E43", color: "#fff" } : {}) }}>
@@ -93,12 +101,15 @@ export const Field = ({ label, children }) => (
   </label>
 );
 
-export const Empty = ({ text, children }) => (
-  <div style={{ padding: "22px 10px", textAlign: "center", color: "#5A6E63", fontSize: 13 }}>
-    {text}
-    {children && <div style={{ marginTop: 10 }}>{children}</div>}
-  </div>
-);
+export const Empty = ({ text, children }) => {
+  const { t } = useLang();
+  return (
+    <div style={{ padding: "22px 10px", textAlign: "center", color: "#5A6E63", fontSize: 13 }}>
+      {tr(t, text)}
+      {children && <div style={{ marginTop: 10 }}>{children}</div>}
+    </div>
+  );
+};
 
 export const Section = ({ title, children }) => (
   <section style={{ ...S.panel, marginBottom: 16 }}>

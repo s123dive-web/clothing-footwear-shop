@@ -1,4 +1,6 @@
 import { useState, useEffect } from "react";
+import { S } from "../ui/styles.js";
+import { LangSelect } from "../i18n/index.jsx";
 import { DEFAULT_SHOP_CONFIG, validateConfig } from "../config/shopConfig.js";
 import { Header, Section, Field } from "../ui/index.jsx";
 
@@ -48,6 +50,17 @@ export function Settings({ config, onSave, notify }) {
   return (
     <div>
       <Header title="Settings" sub="Shop identity — shown in the header, receipts, and reports" />
+      <section
+        style={{ ...S.panel, marginBottom: 16, display: "flex", alignItems: "center", gap: 12 }}
+      >
+        <label htmlFor="lang-setting" style={{ fontWeight: 700, fontSize: 13.5 }}>
+          🌐 Language / भाषा
+        </label>
+        <LangSelect id="lang-setting" style={{ width: "auto", minWidth: 160 }} />
+        <span style={{ fontSize: 12, color: "#556A5F" }}>
+          Menus, Billing and the printed receipt. Saved on this device.
+        </span>
+      </section>
       <div style={{ maxWidth: 720 }}>
         <Section title="Shop details">
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>

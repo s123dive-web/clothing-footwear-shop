@@ -46,6 +46,31 @@ counter, mostly on a phone, with real sales data.** Read the hard rules before c
   VariantChip), `styles.js` (`S`, `CSS`), `charts.jsx` (shared recharts helpers — import ONLY
   from lazy modules), `hooks.js` (`useDebouncedValue`, `useStableCallback`, `usePagedLimit`),
   `AllSalesGate.jsx`, `UpdatePrompt.jsx`.
+- **Counter UX building blocks (Phase 3)** — use these, never the browser's own:
+  - `ui/dialogs.jsx`: `await confirmDialog({ title, message, confirmLabel, danger })`,
+    `promptDialog`, `alertDialog`. **No native `confirm()` / `prompt()` / `alert()` anywhere** —
+    the e2e suites fail on any native dialog.
+  - `ui/toasts.jsx`: `notify(message, { action: { label, run }, kind, duration })`. Errors
+    (`kind: "error"` or a message starting with `⚠`) stay until dismissed; a toast with an
+    action stays 5 s. Reversible deletes (bill, product, expense) do not confirm — they offer
+    **Undo**.
+  - `ui/index.jsx`: `Modal` (focus trap, top-most Esc, focus restore, `data-autofocus`),
+    `PageSkeleton` / `Skeleton` (never a bare "Loading…"), `Empty` (always give it one action
+    button as a child), `focusFirstField`.
+  - `lib/syncStatus.js`: `syncSummary` / `syncText` — the sidebar line and the phone pill.
+  - Billing: held bills live in localStorage `cfs-held-bills-v1` (device-local, not synced).
+- **`src/i18n/`** — `strings.js` (table keyed by the English text → Hindi, Marathi),
+  `index.jsx` (`LangProvider`, `useLang()` → `{ t, lang, setLang }`, `LangSelect`). Language is
+  a per-device preference (`cfs-lang-v1`), default English. `Header` titles/subs and `Empty`
+  text are translated automatically when they are plain strings found in the table. Stored
+  data is language-neutral (e.g. `payment` stays `"Cash"`); only labels are translated.
+  Translated today: navigation, screen titles, sign-in, the whole Billing screen, receipt,
+  sync status, dialog buttons, common empty states. Everything else falls back to English.
+- **Accessibility rules** (enforced by `e2e/a11y.spec.js` on every tab): every control has an
+  accessible name (a wrapping `<label>`/`Field`, or `aria-label` — do NOT add `aria-label` to
+  an input that already has a label, it overrides it); text contrast ≥ 4.5:1; on phones every
+  control ≥ 44 px (`.tap`, `.step`, and the `(pointer: coarse)` block in `ui/styles.js`); no
+  horizontal scrolling at 390 px.
 - **`src/lib/`** — pure, unit-tested helpers: `sync.js` (array↔map bridge, `buildSliceUpdate`,
   3-way `mergeRemote`, `updateItemAtomic`, `sendOp`, sales queries), `ops.js`, `outbox.js`,
   `localdb.js`, `salesWindow.js`, `products.js` (variants, stock maths, `normalizeProduct`),
@@ -181,6 +206,9 @@ read `shop/meta/seeded` and ignore it. Roll back: revert the code; delete the no
 fields; nothing about their shape changed. They are now written by a multi-path update at
 `shop/` instead of at `shop/sales/` — same resulting data.
 
+**Phase 3 — no cloud data-model change.** New device-local localStorage keys only:
+`cfs-held-bills-v1` (held bills), `cfs-lang-v1` (language).
+
 **Phase 2 — no cloud data-model change.** `database.rules.json` gains
 `shop/sales/.indexOn: ["date", "payment"]` (an index, not a shape change; safe to deploy and to
 remove). New device-local IndexedDB `kv` entry `salesMonthly`.
@@ -230,6 +258,13 @@ email (see `resetEmulator` in `e2e/helpers.js`), and sign in.
   full backup/restore, deletes never touch unloaded bills.
 - `e2e/pwa.spec.js` — runs against the PRODUCTION build (`pwa` project) with every non-local
   request aborted: manifest, offline app shell, no auto-activation of a new version.
+- `e2e/usability.spec.js` — Undo, in-app dialogs, focus trap, toast lifetimes, steppers, hold /
+  resume, quick-pick, sticky phone bar, sync count, empty-state actions, skeleton.
+- `e2e/a11y.spec.js` + `e2e/a11y-audit.js` — automated audit of labels, contrast and tap targets
+  on every tab and dialog (desktop + phone), plus sideways-scroll and focus-ring checks.
+- `e2e/i18n.spec.js` — language toggle: menus, Billing, toast, receipt; persistence.
+- Helpers: `dialogClick(page, title, button)` answers an in-app dialog; `receiptHtml(page,
+  click)` captures a printed receipt.
 - One worker, shared emulator; every test wipes the database first. Tests never use
   `page.waitForTimeout` to "wait for sync" — poll the emulator with `eventually(...)`.
 
@@ -282,9 +317,24 @@ Automated (Playwright `window.spec.js` + `pwa.spec.js`, must stay green):
 - [ ] Monthly summary for pre-window months is saved on the device
 - [ ] Manifest + icons served; app shell opens offline; new version waits for the user
 
+Automated (Playwright `usability.spec.js`, `a11y.spec.js`, `i18n.spec.js`, must stay green):
+
+- [ ] Delete bill / product / expense → Undo restores it; the offer disappears after 5 s
+- [ ] Destructive confirm is in-app, red, Cancel focused, Esc cancels; focus stays in the dialog
+- [ ] Warning toast stays until dismissed; info toast goes away
+- [ ] Qty steppers ≥ 44 px and capped at stock; amount fields open the numeric keypad
+- [ ] Hold a bill, bill someone else, reload, resume
+- [ ] Quick-pick row offers recently sold products
+- [ ] Phone: total + Complete pinned to the bottom of the screen
+- [ ] Offline: "N bills waiting to sync" shown; clears when back online
+- [ ] Every empty screen has one action; skeleton while a tab loads
+- [ ] Audit: no unlabelled control, no text under AA contrast, no tap target under 44 px,
+      no sideways scroll, visible focus ring
+- [ ] Hindi / Marathi: menus, Billing, toast, receipt; choice survives a reload
+
 Unit (vitest): `outbox.test.js` (write-ahead, order, replay, idempotency, crash mid-replay,
 failure + backoff, retryNow), `ops.test.js`, `localdb.test.js`, `salesWindow.test.js`,
-`print.test.js`.
+`print.test.js`, `syncStatus.test.js`, `i18n/i18n.test.js`.
 
 Not automated — check by hand on a real phone after anything that touches them:
 
@@ -293,6 +343,10 @@ Not automated — check by hand on a real phone after anything that touches them
 - [ ] Vendor / Supplier bill proof upload and view (Firebase Storage)
 - [ ] Data Import from a PDF / pasted text
 - [ ] Mobile layout (< 820 px): sidebar, Billing grid, modals
+- [ ] Hindi and Marathi wording read by a native speaker (translations were written without
+      one); receipt prints Devanagari correctly on the thermal printer
+- [ ] Numeric keypad really opens on the shop's phone for amount / quantity fields
+- [ ] Sticky Complete bar does not cover anything when the on-screen keyboard is open
 - [ ] Install to home screen (Android Chrome "Add to Home screen"); open with flight mode on
 - [ ] After a deploy: "Update available" bar appears; Reload switches version; a bill in
       progress is not lost if Reload is NOT tapped

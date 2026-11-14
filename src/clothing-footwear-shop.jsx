@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
+import { useLang, LangSelect } from "./i18n/index.jsx";
 import { useDebouncedValue } from "./ui/hooks.js";
-import { syncSummary } from "./lib/syncStatus.js";
+import { syncSummary, syncText } from "./lib/syncStatus.js";
 import { PageSkeleton } from "./ui/index.jsx";
 import { DialogHost, confirmDialog, promptDialog } from "./ui/dialogs.jsx";
 import { useToasts, ToastStack } from "./ui/toasts.jsx";
@@ -176,6 +177,7 @@ const slugify = (s) =>
 // together and a replay can never apply the stock change twice.
 
 function StoreManager({ user, onLogout }) {
+  const { t } = useLang();
   const [tab, setTab] = useState("dashboard");
   const [otherOpen, setOtherOpen] = useState(false);
   // `rawItems` = products exactly as last received from the cloud (or the local cache).
@@ -929,7 +931,7 @@ function StoreManager({ user, onLogout }) {
               onClick={() => setTab(k)}
             >
               <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>{ic}</span>{" "}
-              {label}
+              {t(label)}
               {k === "inventory" && lowStock.length > 0 && (
                 <span style={S.badge}>{lowStock.length}</span>
               )}
@@ -942,7 +944,8 @@ function StoreManager({ user, onLogout }) {
             onClick={() => setOtherOpen((o) => !o)}
             aria-expanded={showOther}
           >
-            <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>⋯</span> Other
+            <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>⋯</span>{" "}
+            {t("Other")}
             <span style={{ marginLeft: "auto", fontSize: 11, opacity: 0.8 }}>
               {showOther ? "▾" : "▸"}
             </span>
@@ -958,7 +961,7 @@ function StoreManager({ user, onLogout }) {
                 <span style={{ width: 22, display: "inline-block", textAlign: "center" }}>
                   {ic}
                 </span>{" "}
-                {label}
+                {t(label)}
                 {k === "alerts" && alertCount > 0 && <span style={S.badge}>{alertCount}</span>}
               </button>
             ))}
@@ -972,7 +975,7 @@ function StoreManager({ user, onLogout }) {
                 padding: "0 6px 4px",
               }}
             >
-              Backup
+              {t("Backup")}
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <button
@@ -999,7 +1002,7 @@ function StoreManager({ user, onLogout }) {
                 marginTop: 6,
               }}
             >
-              ⬆ Restore (JSON / XLSX)
+              ⬆ {t("Restore (JSON / XLSX)")}
               <input
                 type="file"
                 accept=".json,.xlsx,.xls,application/json"
@@ -1014,14 +1017,14 @@ function StoreManager({ user, onLogout }) {
               style={{ border: "1px solid #2A5A3E", justifyContent: "center" }}
               onClick={resetMyPassword}
             >
-              🔑 Reset
+              🔑 {t("Reset")}
             </button>
             <button
               className="navbtn"
               style={{ border: "1px solid #2A5A3E", justifyContent: "center" }}
               onClick={onLogout}
             >
-              ⎋ Logout
+              ⎋ {t("Logout")}
             </button>
           </div>
           <div style={{ fontSize: 11, color: "#9DB5A8", padding: "6px 14px 8px" }}>
@@ -1035,7 +1038,7 @@ function StoreManager({ user, onLogout }) {
                   display: "inline-block",
                 }}
               />
-              {sync.tone === "error" ? "Online" : sync.text}
+              {sync.tone === "error" ? t("Online") : syncText(sync, t)}
             </span>
             {sync.tone === "error" && (
               <button
@@ -1043,16 +1046,26 @@ function StoreManager({ user, onLogout }) {
                 style={{ border: "1px solid #C9803A", color: "#F2C48D", margin: "2px 0 4px" }}
                 onClick={() => outboxRef.current?.retryNow()}
               >
-                ⚠ {sync.text}
+                ⚠ {syncText(sync, t)}
               </button>
             )}
             <br />
             {user?.email ? (
               <>
-                Signed in as {user.email}.<br />
+                {t("Signed in as {email}.", { email: user.email })}
+                <br />
               </>
             ) : null}
-            Back up regularly.
+            {t("Back up regularly.")}
+            <LangSelect
+              style={{
+                marginTop: 8,
+                background: "#173F29",
+                color: "#E6F2EA",
+                borderColor: "#2A5A3E",
+                fontSize: 13,
+              }}
+            />
           </div>
         </nav>
 
@@ -1060,7 +1073,7 @@ function StoreManager({ user, onLogout }) {
         <main className="main" style={S.main}>
           <Suspense fallback={<PageSkeleton />}>
             {!loaded ? (
-              <PageSkeleton label="Loading store data…" />
+              <PageSkeleton label={t("Loading store data…")} />
             ) : tab === "dashboard" ? (
               <Dashboard
                 items={items}
@@ -1200,7 +1213,7 @@ function StoreManager({ user, onLogout }) {
               color: "#fff",
             }}
             onClick={() => outboxRef.current?.retryNow()}
-            aria-label={sync.text}
+            aria-label={syncText(sync, t)}
           >
             {sync.tone === "error" ? "⚠" : sync.tone === "offline" ? "⛔" : "⟳"} {sync.short}
           </button>

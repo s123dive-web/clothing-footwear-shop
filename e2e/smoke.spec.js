@@ -17,6 +17,7 @@ import {
   eventually,
   dbPut,
   dialogClick,
+  receiptHtml,
 } from "./helpers.js";
 
 const KURTI = {
@@ -126,9 +127,7 @@ test("3 · sell 2 units of one variant → stock −2, bill in Sales History, re
   await expect(page.getByText(`${KURTI.name} × 2`)).toBeVisible();
 
   // Receipt: printed through a hidden iframe whose srcdoc is the receipt HTML.
-  await page.evaluate(() => (window.print = () => {})); // don't open a print dialog
-  await page.getByRole("button", { name: "🖨 Print" }).click();
-  const html = await page.locator('iframe[aria-hidden="true"]').getAttribute("srcdoc");
+  const html = await receiptHtml(page, () => page.getByRole("button", { name: "🖨 Print" }).click());
   const shopName = await page.locator("nav.nav img + div > div").first().innerText();
   expect(shopName.trim().length).toBeGreaterThan(0);
   expect(html).toContain(`<h2>${shopName.trim().replace(/&/g, "&amp;")}</h2>`);

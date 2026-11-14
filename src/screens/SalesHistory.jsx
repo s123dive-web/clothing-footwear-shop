@@ -1,5 +1,6 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, memo, useEffect } from "react";
+import { useLang } from "../i18n/index.jsx";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { money, INR, dateStr, todayStr, uid } from "../lib/format.js";
 import { Header, Empty, Modal, Field } from "../ui/index.jsx";
@@ -170,6 +171,7 @@ export function SalesHistory({
   recordSale,
   goBilling,
 }) {
+  const { t } = useLang();
   const config = useShopConfig();
   const [open, setOpen] = useState(null);
   const [openDates, setOpenDates] = useState(() => new Set()); // expanded past dates (today is always open)
@@ -242,7 +244,7 @@ export function SalesHistory({
   const [dateLimit, showMoreDates] = usePagedLimit(DATES_PER_PAGE, dq + "|" + from + "|" + to);
   const [fullDates, setFullDates] = useState(() => new Set());
   const onToggle = useStableCallback((id) => setOpen((o) => (o === id ? null : id)));
-  const onPrint = useStableCallback((s) => printReceipt(s, config));
+  const onPrint = useStableCallback((s) => printReceipt(s, config, t));
   const onEdit = useStableCallback((s) => openEdit(s));
   const onSplit = useStableCallback((s) => openSplit(s));
   const onDelete = useStableCallback((s) => deleteSale(s));
@@ -256,13 +258,13 @@ export function SalesHistory({
     // back out (a fresh outbox op, so it is as safe as the original sale).
     voidSale(s);
     log("sale", `Deleted bill ${INR(s.total)} (${s.date}) — stock restored`);
-    notify("Bill deleted, stock restored", {
+    notify(t("Bill deleted, stock restored"), {
       action: {
-        label: "Undo",
+        label: t("Undo"),
         run: () => {
           recordSale(s);
           log("sale", `Restored deleted bill ${INR(s.total)} (${s.date})`);
-          notify("Bill restored");
+          notify(t("Bill restored"));
         },
       },
     });
@@ -591,7 +593,7 @@ export function SalesHistory({
           <Empty text="No sales yet. Bills will appear here after you complete a sale.">
             {goBilling && (
               <button className="btn primary" onClick={goBilling}>
-                Start billing
+                {t("Start billing")}
               </button>
             )}
           </Empty>

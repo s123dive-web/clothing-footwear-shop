@@ -102,15 +102,17 @@ export function printHtml(html, title) {
 }
 
 // Variant descriptor for a receipt/history line: "Size M · Maroon" (only the parts present).
-export const lineVariantText = (l) =>
-  [l.size ? "Size " + l.size : "", l.color || ""].filter(Boolean).join(" · ");
+const identity = (key, vars) =>
+  vars ? key.replace(/\{(\w+)\}/g, (m, n) => (n in vars ? String(vars[n]) : m)) : key;
+export const lineVariantText = (l, t = identity) =>
+  [l.size ? t("Size {size}", { size: l.size }) : "", l.color || ""].filter(Boolean).join(" · ");
 
 // Build a thermal-style receipt and send it to the printer. `config` is the shop config
 // (name, address, gstin, phone, receipt footer, currency, logo) — nothing is hardcoded.
-export function printReceipt(sale, config = DEFAULT_SHOP_CONFIG) {
+export function printReceipt(sale, config = DEFAULT_SHOP_CONFIG, t = identity) {
   const rows = sale.lines
     .map((l) => {
-      const vt = lineVariantText(l);
+      const vt = lineVariantText(l, t);
       return `<tr><td>${escapeHtml(l.name)}${vt ? `<div class="var">${escapeHtml(vt)}</div>` : ""}</td><td class="c">${l.qty}</td><td class="r">${INR(l.amount)}</td></tr>`;
     })
     .join("");
@@ -136,20 +138,20 @@ export function printReceipt(sale, config = DEFAULT_SHOP_CONFIG) {
     <table>${rows}
     ${
       sale.discount > 0
-        ? `<tr><td>Subtotal</td><td></td><td class="r">${INR(sale.subtotal != null ? sale.subtotal : money((sale.total || 0) + sale.discount))}</td></tr>
-    <tr><td>Discount${sale.discountPct ? " (" + sale.discountPct + "%)" : ""}</td><td></td><td class="r">−${INR(sale.discount)}</td></tr>`
+        ? `<tr><td>${escapeHtml(t("Subtotal"))}</td><td></td><td class="r">${INR(sale.subtotal != null ? sale.subtotal : money((sale.total || 0) + sale.discount))}</td></tr>
+    <tr><td>${escapeHtml(t("Discount"))}${sale.discountPct ? " (" + sale.discountPct + "%)" : ""}</td><td></td><td class="r">−${INR(sale.discount)}</td></tr>`
         : ""
     }
-    <tr class="tot"><td>TOTAL</td><td></td><td class="r">${INR(sale.total)}</td></tr>
+    <tr class="tot"><td>${escapeHtml(t("TOTAL"))}</td><td></td><td class="r">${INR(sale.total)}</td></tr>
     </table>
-    ${sale.payment ? `<div class="meta">Paid via ${escapeHtml(sale.payment)}${sale.customer ? " — " + escapeHtml(sale.customer) : ""}</div>` : ""}
-    ${sale.customer || sale.mobile ? `<div class="meta">Customer: ${escapeHtml(sale.customer || "—")}${sale.mobile ? " · " + escapeHtml(sale.mobile) : ""}</div>` : ""}
-    ${sale.payment === "Udhari" ? `<div class="meta">Paid now: ${INR(sale.paid || 0)}${sale.paidMode ? " (" + escapeHtml(sale.paidMode) + ")" : ""} &nbsp; Balance due: ${INR(Math.max(0, (sale.total || 0) - (sale.paid || 0)))}</div>` : ""}
+    ${sale.payment ? `<div class="meta">${escapeHtml(t("Paid via {mode}", { mode: t(sale.payment) }))}${sale.customer ? " — " + escapeHtml(sale.customer) : ""}</div>` : ""}
+    ${sale.customer || sale.mobile ? `<div class="meta">${escapeHtml(t("Customer: {name}", { name: sale.customer || "—" }))}${sale.mobile ? " · " + escapeHtml(sale.mobile) : ""}</div>` : ""}
+    ${sale.payment === "Udhari" ? `<div class="meta">${escapeHtml(t("Paid now: {amount}", { amount: INR(sale.paid || 0) }))}${sale.paidMode ? " (" + escapeHtml(t(sale.paidMode)) + ")" : ""} &nbsp; ${escapeHtml(t("Balance due: {amount}", { amount: INR(Math.max(0, (sale.total || 0) - (sale.paid || 0))) }))}</div>` : ""}
     ${config.receiptFooter ? `<div class="ft">${escapeHtml(config.receiptFooter)}</div>` : ""}
     <div class="pay">
       <img src="${assetUrl(PAYMENT_QR_SRC)}" alt="Scan to pay" onerror="this.style.display='none'" />
-      <div class="lbl">Scan to Pay · UPI</div>
+      <div class="lbl">${escapeHtml(t("Scan to Pay · UPI"))}</div>
     </div>`,
-    "Receipt"
+    t("Receipt")
   );
 }

@@ -9,6 +9,7 @@
 // confirm in red. If no host is mounted the calls fall back to the native dialogs.
 import { useEffect, useState } from "react";
 import { Modal } from "./index.jsx";
+import { useLang } from "../i18n/index.jsx";
 
 let host = null; // (request) => void, set by the mounted DialogHost
 const waiting = [];
@@ -56,6 +57,7 @@ const btn = {
 };
 
 export function DialogHost() {
+  const { t } = useLang();
   const [queue, setQueue] = useState([]);
   const [text, setText] = useState("");
   useEffect(() => {
@@ -123,7 +125,7 @@ export function DialogHost() {
               style={{ ...btn, background: "#E4ECE5", color: "#23402F" }}
               onClick={() => finish(cancelValue)}
             >
-              {cur.cancelLabel || "Cancel"}
+              {cur.cancelLabel || t("Cancel")}
             </button>
           )}
           <button
@@ -135,7 +137,8 @@ export function DialogHost() {
               color: "#fff",
             }}
           >
-            {cur.confirmLabel || (cur.kind === "alert" ? "OK" : cur.danger ? "Delete" : "OK")}
+            {cur.confirmLabel ||
+              (cur.kind === "alert" ? t("OK") : cur.danger ? t("Delete") : t("OK"))}
           </button>
         </div>
       </form>

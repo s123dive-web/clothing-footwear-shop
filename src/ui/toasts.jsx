@@ -5,6 +5,7 @@
 //     a warning must not vanish before it has been read.
 // Up to three are stacked; the newest is at the bottom.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useLang } from "../i18n/index.jsx";
 
 const INFO_MS = 2600;
 const ACTION_MS = 5000;
@@ -71,6 +72,7 @@ const smallBtn = {
 };
 
 export function ToastStack({ toasts, dismiss }) {
+  const { t: tr } = useLang();
   if (!toasts.length) return null;
   return (
     <div className="toasts" aria-live="polite">
@@ -105,7 +107,7 @@ export function ToastStack({ toasts, dismiss }) {
           )}
           {(t.sticky || t.action) && (
             <button
-              aria-label="Dismiss message"
+              aria-label={tr("Dismiss message")}
               style={{
                 ...smallBtn,
                 padding: 0,
