@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback, lazy, Suspense } from "react";
 import { isFirebaseConfigured, auth } from "./config/firebase.js";
 import { onAuthStateChanged, signOut, sendPasswordResetEmail } from "firebase/auth";
 import { FirebaseSetupNeeded } from "./screens/FirebaseSetupNeeded.jsx";
@@ -48,19 +48,23 @@ import { S, CSS } from "./ui/styles.js";
 import { LOGO_SRC } from "./lib/print.js";
 import { Dashboard } from "./screens/Dashboard.jsx";
 import { Billing } from "./screens/Billing.jsx";
-import { RawData } from "./screens/RawData.jsx";
-import { Inventory } from "./screens/Inventory.jsx";
-import { Alerts } from "./screens/Alerts.jsx";
-import { SalesHistory } from "./screens/SalesHistory.jsx";
-import { Finance } from "./screens/Finance.jsx";
-import { Stats } from "./screens/Stats.jsx";
-import { Udhari } from "./screens/Udhari.jsx";
-import { Expenses } from "./screens/Expenses.jsx";
-import { VendorBills } from "./screens/VendorBills.jsx";
-import { DailyBills } from "./screens/DailyBills.jsx";
-import { Logs } from "./screens/Logs.jsx";
-import { Settings } from "./screens/Settings.jsx";
-import { Admin } from "./screens/Admin.jsx";
+
+// Every tab except Dashboard and Billing (the two the counter opens all day) is loaded on first
+// use, so the initial bundle carries only what is needed to start billing.
+const lazyScreen = (load, name) => lazy(() => load().then((m) => ({ default: m[name] })));
+const RawData = lazyScreen(() => import("./screens/RawData.jsx"), "RawData");
+const Inventory = lazyScreen(() => import("./screens/Inventory.jsx"), "Inventory");
+const Alerts = lazyScreen(() => import("./screens/Alerts.jsx"), "Alerts");
+const SalesHistory = lazyScreen(() => import("./screens/SalesHistory.jsx"), "SalesHistory");
+const Finance = lazyScreen(() => import("./screens/Finance.jsx"), "Finance");
+const Stats = lazyScreen(() => import("./screens/Stats.jsx"), "Stats");
+const Udhari = lazyScreen(() => import("./screens/Udhari.jsx"), "Udhari");
+const Expenses = lazyScreen(() => import("./screens/Expenses.jsx"), "Expenses");
+const VendorBills = lazyScreen(() => import("./screens/VendorBills.jsx"), "VendorBills");
+const DailyBills = lazyScreen(() => import("./screens/DailyBills.jsx"), "DailyBills");
+const Logs = lazyScreen(() => import("./screens/Logs.jsx"), "Logs");
+const Settings = lazyScreen(() => import("./screens/Settings.jsx"), "Settings");
+const Admin = lazyScreen(() => import("./screens/Admin.jsx"), "Admin");
 
 // ---------- root: Firebase auth gate ----------
 export default function App() {
@@ -643,11 +647,11 @@ function StoreManager({ user, onLogout }) {
     );
   };
 
-  const exportData = (fmt) => {
+  const exportData = async (fmt) => {
     const data = { items, sales, expenses, logs, vendorBills: bills, dailyBills };
     const fname = `${slugify(config.name)}-${todayStr()}.${fmt === "xlsx" ? "xlsx" : "json"}`;
     try {
-      if (fmt === "xlsx") exportXlsx(data, fname);
+      if (fmt === "xlsx") await exportXlsx(data, fname);
       else exportJson(data, fname);
       addLog("backup", `Backup downloaded (${fmt.toUpperCase()})`);
       notify(`Backup downloaded (${fmt.toUpperCase()})`);
@@ -865,102 +869,109 @@ function StoreManager({ user, onLogout }) {
 
         {/* main */}
         <main className="main" style={S.main}>
-          {!loaded ? (
-            <div style={{ padding: 40, color: "#667" }}>Loading store data…</div>
-          ) : tab === "dashboard" ? (
-            <Dashboard
-              items={items}
-              sales={sales}
-              lowStock={lowStock}
-              goBilling={() => setTab("billing")}
-            />
-          ) : tab === "billing" ? (
-            <Billing
-              items={items}
-              sales={sales}
-              recordSale={recordSale}
-              online={online}
-              notify={notify}
-              log={addLog}
-            />
-          ) : tab === "raw" ? (
-            <RawData
-              items={items}
-              setSales={setSales}
-              setExpenses={setExpenses}
-              notify={notify}
-              log={addLog}
-            />
-          ) : tab === "inventory" ? (
-            <Inventory
-              items={items}
-              notify={notify}
-              log={addLog}
-              cats={cats}
-              onAddCategory={addCategory}
-            />
-          ) : tab === "alerts" ? (
-            <Alerts items={items} goInventory={() => setTab("inventory")} />
-          ) : tab === "sales" ? (
-            <SalesHistory
-              sales={sales}
-              items={items}
-              setSales={setSales}
-              amendSale={amendSale}
-              voidSale={voidSale}
-              notify={notify}
-              log={addLog}
-            />
-          ) : tab === "finance" && tabEnabled("finance") ? (
-            <Finance sales={sales} expenses={expenses} />
-          ) : tab === "stats" ? (
-            <Stats sales={sales} expenses={expenses} items={items} />
-          ) : tab === "udhari" ? (
-            <Udhari sales={sales} setSales={setSales} notify={notify} log={addLog} />
-          ) : tab === "expense" ? (
-            <Expenses expenses={expenses} setExpenses={setExpenses} notify={notify} log={addLog} />
-          ) : tab === "vendorbills" ? (
-            <VendorBills
-              bills={bills}
-              setBills={setBills}
-              setDailyBills={setDailyBills}
-              goDailyBills={() => setTab("dailybills")}
-              online={online}
-              notify={notify}
-              log={addLog}
-            />
-          ) : tab === "dailybills" ? (
-            <DailyBills
-              dailyBills={dailyBills}
-              setDailyBills={setDailyBills}
-              bills={bills}
-              setBills={setBills}
-              goVendorBills={() => setTab("vendorbills")}
-              notify={notify}
-              log={addLog}
-            />
-          ) : tab === "logs" ? (
-            <Logs logs={logs} setLogs={setLogs} notify={notify} />
-          ) : tab === "settings" ? (
-            <Settings config={config} onSave={updateConfig} notify={notify} />
-          ) : tab === "admin" ? (
-            <Admin
-              items={items}
-              setSales={setSales}
-              setExpenses={setExpenses}
-              setLogs={setLogs}
-              user={user}
-              notify={notify}
-              log={addLog}
-            />
-          ) : (
-            <Dashboard
-              items={items}
-              sales={sales}
-              lowStock={lowStock}
-              goBilling={() => setTab("billing")}
-            />
-          )}
+          <Suspense fallback={<div style={{ padding: 40, color: "#667" }}>Loading…</div>}>
+            {!loaded ? (
+              <div style={{ padding: 40, color: "#667" }}>Loading store data…</div>
+            ) : tab === "dashboard" ? (
+              <Dashboard
+                items={items}
+                sales={sales}
+                lowStock={lowStock}
+                goBilling={() => setTab("billing")}
+              />
+            ) : tab === "billing" ? (
+              <Billing
+                items={items}
+                sales={sales}
+                recordSale={recordSale}
+                online={online}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "raw" ? (
+              <RawData
+                items={items}
+                setSales={setSales}
+                setExpenses={setExpenses}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "inventory" ? (
+              <Inventory
+                items={items}
+                notify={notify}
+                log={addLog}
+                cats={cats}
+                onAddCategory={addCategory}
+              />
+            ) : tab === "alerts" ? (
+              <Alerts items={items} goInventory={() => setTab("inventory")} />
+            ) : tab === "sales" ? (
+              <SalesHistory
+                sales={sales}
+                items={items}
+                setSales={setSales}
+                amendSale={amendSale}
+                voidSale={voidSale}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "finance" && tabEnabled("finance") ? (
+              <Finance sales={sales} expenses={expenses} />
+            ) : tab === "stats" ? (
+              <Stats sales={sales} expenses={expenses} items={items} />
+            ) : tab === "udhari" ? (
+              <Udhari sales={sales} setSales={setSales} notify={notify} log={addLog} />
+            ) : tab === "expense" ? (
+              <Expenses
+                expenses={expenses}
+                setExpenses={setExpenses}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "vendorbills" ? (
+              <VendorBills
+                bills={bills}
+                setBills={setBills}
+                setDailyBills={setDailyBills}
+                goDailyBills={() => setTab("dailybills")}
+                online={online}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "dailybills" ? (
+              <DailyBills
+                dailyBills={dailyBills}
+                setDailyBills={setDailyBills}
+                bills={bills}
+                setBills={setBills}
+                goVendorBills={() => setTab("vendorbills")}
+                notify={notify}
+                log={addLog}
+              />
+            ) : tab === "logs" ? (
+              <Logs logs={logs} setLogs={setLogs} notify={notify} />
+            ) : tab === "settings" ? (
+              <Settings config={config} onSave={updateConfig} notify={notify} />
+            ) : tab === "admin" ? (
+              <Admin
+                items={items}
+                setSales={setSales}
+                setExpenses={setExpenses}
+                setLogs={setLogs}
+                user={user}
+                notify={notify}
+                log={addLog}
+              />
+            ) : (
+              <Dashboard
+                items={items}
+                sales={sales}
+                lowStock={lowStock}
+                goBilling={() => setTab("billing")}
+              />
+            )}
+          </Suspense>
         </main>
 
         {toast && <div style={S.toast}>{toast}</div>}

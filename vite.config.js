@@ -11,11 +11,11 @@ export default defineConfig(({ command }) => ({
     // deploys and loads them in parallel instead of in one ~1.5 MB blob.
     rollupOptions: {
       output: {
+        // recharts and xlsx are NOT listed: they are only reached through dynamic imports
+        // (lazy tabs / on-demand export), and Rollup gives them their own async chunks.
         manualChunks: {
           react: ["react", "react-dom"],
-          charts: ["recharts"],
-          firebase: ["firebase/app", "firebase/auth", "firebase/database"],
-          xlsx: ["xlsx"],
+          firebase: ["firebase/app", "firebase/auth", "firebase/database", "firebase/storage"],
         },
       },
     },
