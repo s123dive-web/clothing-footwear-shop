@@ -1,5 +1,6 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useRef, useEffect, useMemo } from "react";
+import { creditToUse } from "../lib/returns.js";
 import { featureOn } from "../config/features.js";
 import { provisionalNo } from "../lib/billNumbers.js";
 import { waLink, receiptText } from "../lib/whatsapp.js";
@@ -34,7 +35,17 @@ const heldLabel = (b) =>
   new Date(b.at || Date.now()).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 
 // ---------- Billing / POS ----------
-export function Billing({ items, sales, recordSale, online, notify, log, goInventory }) {
+export function Billing({
+  items,
+  sales,
+  recordSale,
+  online,
+  notify,
+  log,
+  goInventory,
+  exchangeCredit = null,
+  setExchangeCredit,
+}) {
   const { t } = useLang();
   const config = useShopConfig();
   const [q, setQ] = useState("");
@@ -191,6 +202,10 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
           purchasePrice: money(product.purchasePrice),
           category: product.category,
           subcategory: product.subcategory,
+          // Feature "gstInvoice": the tax details are snapshotted onto the bill line.
+          ...(featureOn("gstInvoice") && product.gstRate > 0
+            ? { gstRate: product.gstRate, hsn: product.hsn || "" }
+            : {}),
           qty: 1,
         },
       ];
@@ -266,6 +281,12 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       : Math.min(subtotal, money(discNum));
   const total = money(subtotal - discountAmt);
   const profit = money(grossProfit - discountAmt);
+  // Feature "returns": credit from an exchange is taken off what the customer pays for this
+  // bill (not off the bill's value — the return bill already reversed that revenue).
+  const [applyCredit, setApplyCredit] = useState(true);
+  const creditOn = featureOn("returns") && exchangeCredit && pay !== "Udhari" && applyCredit;
+  const creditUsed = creditOn ? creditToUse(exchangeCredit.amount, total) : 0;
+  const toCollect = money(total - creditUsed);
 
   const currentBill = () => ({
     id: uid(),
@@ -393,6 +414,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
         color: c.color || "",
         category: c.category || "",
         subcategory: c.subcategory || "",
+        ...(c.gstRate > 0 ? { gstRate: c.gstRate, ...(c.hsn ? { hsn: c.hsn } : {}) } : {}),
         ...(c.misc ? { misc: true } : { productId: c.productId, variantId: c.variantId }),
       })),
       total,
@@ -410,6 +432,7 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
       ...(pay === "Udhari" ? { paid: Math.min(total, Math.max(0, money(+paidNow || 0))) } : {}),
       ...(pay === "Udhari" && +paidNow > 0 ? { paidMode } : {}),
       // Feature "billNumbers": provisional now, the sequential number arrives once online.
+      ...(creditUsed > 0 ? { creditUsed, creditOf: exchangeCredit.returnId } : {}),
       ...(featureOn("billNumbers")
         ? { billNoProv: provisionalNo(now.getTime()), createdAt: now.getTime() }
         : {}),
@@ -428,6 +451,8 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
         (customer.trim() ? ` (${customer.trim()})` : "") +
         (backDated ? ` · back-dated to ${saleDate}` : "")
     );
+    if (creditUsed > 0)
+      setExchangeCredit?.({ ...exchangeCredit, amount: money(exchangeCredit.amount - creditUsed) });
     clearBill();
     searchRef.current?.focus();
     notify(
@@ -812,6 +837,43 @@ export function Billing({ items, sales, recordSale, online, notify, log, goInven
               <span>{INR(total)}</span>
             </div>
           </div>
+
+          {featureOn("returns") && exchangeCredit && (
+            <div
+              role="status"
+              style={{
+                background: "#FFF8E6",
+                border: "1.5px solid #E3B34A",
+                borderRadius: 10,
+                padding: "8px 10px",
+                margin: "8px 0",
+                fontSize: 13,
+              }}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={applyCredit}
+                  onChange={(e) => setApplyCredit(e.target.checked)}
+                />
+                <span>
+                  ↩ Exchange credit <b>{INR(exchangeCredit.amount)}</b>
+                  {exchangeCredit.customer ? ` (${exchangeCredit.customer})` : ""} — use on this
+                  bill
+                </span>
+              </label>
+              {creditUsed > 0 && (
+                <div style={{ fontWeight: 800, marginTop: 4 }}>
+                  Credit used {INR(creditUsed)} · To collect {INR(toCollect)}
+                </div>
+              )}
+              {pay === "Udhari" && (
+                <div style={{ color: "#6B4700", marginTop: 4 }}>
+                  Credit cannot be used on a credit (Udhari) bill.
+                </div>
+              )}
+            </div>
+          )}
 
           {/* payment */}
           <div style={{ display: "flex", gap: 6, margin: "10px 0" }}>

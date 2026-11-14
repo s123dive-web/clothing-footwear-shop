@@ -9,6 +9,8 @@ import {
 } from "../lib/catalog.js";
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, useRef, memo } from "react";
+import { featureOn } from "../config/features.js";
+import { GST_RATES } from "../lib/gst.js";
 import { confirmDialog, alertDialog } from "../ui/dialogs.jsx";
 import { useDebouncedValue, useStableCallback, usePagedLimit } from "../ui/hooks.js";
 import { normName, iconFor } from "../lib/domain.js";
@@ -338,6 +340,9 @@ export function toFormShape(p) {
     variants: (p.variants || []).map((v) => ({ ...v })),
     createdAt: p.createdAt,
     version: p.version,
+    // Optional fields ride along even when their feature is off, so an edit never drops them.
+    ...(p.hsn ? { hsn: p.hsn } : {}),
+    ...(p.gstRate ? { gstRate: p.gstRate } : {}),
   };
 }
 
@@ -486,6 +491,9 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
       supplier: (f.supplier || "").trim(),
       imageUrl: (f.imageUrl || "").trim(),
       notes: (f.notes || "").trim(),
+      ...(featureOn("gstInvoice")
+        ? { hsn: (f.hsn || "").trim(), gstRate: Number(f.gstRate) || 0 }
+        : {}),
       variants: variants.map((v) => ({
         id: v.id,
         size: String(v.size || "").trim(),
@@ -612,6 +620,28 @@ export function ProductForm({ initial, cats, config, onAddCategory, onSave, onCl
             placeholder="0"
           />
         </Field>
+        {featureOn("gstInvoice") && (
+          <>
+            <Field label="HSN code">
+              <input
+                className="input"
+                inputMode="numeric"
+                value={f.hsn || ""}
+                onChange={set("hsn")}
+                placeholder="e.g. 6204"
+              />
+            </Field>
+            <Field label="GST rate (price includes GST)">
+              <select className="input" value={String(f.gstRate || 0)} onChange={set("gstRate")}>
+                {GST_RATES.map((r) => (
+                  <option key={r} value={r}>
+                    {r === 0 ? "No GST / exempt" : r + "%"}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </>
+        )}
         <Field label="Supplier">
           <input
             className="input"

@@ -1,5 +1,13 @@
 import { useShopConfig } from "../config/shopConfig.js";
 import { useState, useMemo, memo, useEffect } from "react";
+import {
+  buildReturn,
+  canReturn,
+  hasReturns,
+  isReturn,
+  returnableQty,
+  unitPaid,
+} from "../lib/returns.js";
 import { featureOn } from "../config/features.js";
 import { billNoText } from "../lib/billNumbers.js";
 import { waLink, receiptText } from "../lib/whatsapp.js";
@@ -10,6 +18,112 @@ import { Header, Empty, Modal, Field } from "../ui/index.jsx";
 import { S } from "../ui/styles.js";
 import { PAY_COLORS } from "../lib/domain.js";
 import { printReceipt, lineVariantText } from "../lib/print.js";
+
+// Return / exchange dialog: choose how many of each line come back and how the customer is
+// compensated. Nothing is written until "Confirm return".
+function ReturnDialog({ sale, onClose, onConfirm }) {
+  const [picks, setPicks] = useState({});
+  const [mode, setMode] = useState("Cash");
+  const setPick = (i, q, max) =>
+    setPicks((p) => ({ ...p, [i]: Math.max(0, Math.min(max, Math.floor(q) || 0)) }));
+  const refund = money(sale.lines.reduce((a, l, i) => a + unitPaid(sale, l) * (picks[i] || 0), 0));
+  const any = Object.values(picks).some((q) => q > 0);
+  return (
+    <Modal title="Return / exchange" onClose={onClose}>
+      <div style={{ fontSize: 12.5, color: "#556A5F", marginBottom: 10 }}>
+        Bill of {sale.date} · {INR(sale.total)}
+        {sale.customer ? ` · ${sale.customer}` : ""}. Returned items go back into stock.
+      </div>
+      {sale.lines.map((l, i) => {
+        const max = returnableQty(l);
+        const q = picks[i] || 0;
+        return (
+          <div
+            key={i}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              padding: "6px 0",
+              borderBottom: "1px dotted #E7DDE2",
+              opacity: max ? 1 : 0.55,
+            }}
+          >
+            <div style={{ flex: 1, minWidth: 0, fontSize: 13 }}>
+              <b>{l.name}</b>
+              <div style={{ fontSize: 11.5, color: "#556A5F" }}>
+                {lineVariantText(l) ? lineVariantText(l) + " · " : ""}
+                sold {l.qty}
+                {l.returned ? ` · ${l.returned} already returned` : ""}
+              </div>
+            </div>
+            <div className="stepper">
+              <button
+                className="step"
+                disabled={!max}
+                aria-label={"Return one less " + l.name}
+                onClick={() => setPick(i, q - 1, max)}
+              >
+                −
+              </button>
+              <input
+                className="input"
+                style={{ width: 48, padding: "5px 4px", textAlign: "center" }}
+                type="number"
+                inputMode="numeric"
+                min="0"
+                max={max}
+                disabled={!max}
+                value={q}
+                onChange={(e) => setPick(i, +e.target.value, max)}
+                aria-label={"Quantity of " + l.name + " to return"}
+              />
+              <button
+                className="step"
+                disabled={!max}
+                aria-label={"Return one more " + l.name}
+                onClick={() => setPick(i, q + 1, max)}
+              >
+                +
+              </button>
+            </div>
+          </div>
+        );
+      })}
+      <div style={{ display: "flex", gap: 6, margin: "12px 0 6px" }}>
+        {[
+          ["Cash", "Refund cash"],
+          ["UPI", "Refund UPI"],
+          ["Credit", "Credit on new bill"],
+        ].map(([k, label]) => (
+          <button
+            key={k}
+            className={"seg wide" + (mode === k ? " on" : "")}
+            onClick={() => setMode(k)}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div style={{ fontWeight: 800, fontSize: 17, margin: "10px 0" }}>
+        {mode === "Credit" ? "Credit" : "Refund"}: {INR(refund)}
+      </div>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button className="btn big" style={{ flex: 1 }} data-autofocus onClick={onClose}>
+          Cancel
+        </button>
+        <button
+          className="btn primary big"
+          style={{ flex: 1 }}
+          disabled={!any}
+          onClick={() => onConfirm(picks, mode)}
+        >
+          Confirm return
+        </button>
+      </div>
+    </Modal>
+  );
+}
 
 // One bill row (+ its expanded detail). Memoised so typing in the search box, opening another
 // bill or a toast does not re-render every bill on screen.
@@ -23,11 +137,13 @@ const BillRow = memo(function BillRow({
   onSplit,
   onDelete,
   waHref,
+  onReturn,
 }) {
   return (
     <div>
       <div style={{ ...S.row, cursor: "pointer" }} onClick={() => onToggle(s.id)}>
         <span>
+          {isReturn(s) && <b style={{ color: "#B3261E", marginRight: 6 }}>↩ RETURN</b>}
           {billNoText(s) && (
             <b style={{ marginRight: 6, fontVariantNumeric: "tabular-nums" }}>#{billNoText(s)}</b>
           )}
@@ -156,6 +272,11 @@ const BillRow = memo(function BillRow({
                 🟢 WhatsApp
               </a>
             )}
+            {onReturn && canReturn(s) && (
+              <button className="btn small" onClick={() => onReturn(s)}>
+                ↩ Return / exchange
+              </button>
+            )}
             <button className="btn small ghost" onClick={() => onEdit(s)}>
               ✎ Edit bill
             </button>
@@ -187,6 +308,8 @@ export function SalesHistory({
   loadOlderSales,
   recordSale,
   goBilling,
+  returnSale,
+  setExchangeCredit,
 }) {
   const { t } = useLang();
   const config = useShopConfig();
@@ -268,6 +391,8 @@ export function SalesHistory({
     waLink(s.mobile, receiptText(s, config, { t, money: INR }))
   );
   const waHref = featureOn("whatsappReceipt") ? waLinkFor : null;
+  const openReturn = useStableCallback((s) => setReturning(s));
+  const onReturn = featureOn("returns") ? openReturn : null;
   const onEdit = useStableCallback((s) => openEdit(s));
   const onSplit = useStableCallback((s) => openSplit(s));
   const onDelete = useStableCallback((s) => deleteSale(s));
@@ -276,7 +401,41 @@ export function SalesHistory({
   // the per-variant stock correction are ONE outbox op, so they cannot drift apart, failures
   // are surfaced and retried, and a replay never adjusts stock twice. Lines without a
   // productId (misc, or legacy) touch no stock.
+  // A return bill, or a bill that has had units returned, is locked: changing either side
+  // alone would leave the pair inconsistent.
+  const lockedByReturn = (s) => {
+    if (!isReturn(s) && !hasReturns(s)) return false;
+    notify(
+      isReturn(s)
+        ? "A return bill cannot be edited or deleted."
+        : "This bill has returns against it — it cannot be edited, split or deleted."
+    );
+    return true;
+  };
+  const [returning, setReturning] = useState(null); // the bill a return is being made from
+  const confirmReturn = (orig, picks, mode) => {
+    const now = new Date();
+    const { ret, lines, refund } = buildReturn(orig, picks, {
+      id: uid(),
+      date: todayStr(),
+      time: now.toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" }),
+      mode,
+    });
+    returnSale(orig, ret, lines);
+    log("sale", `Return ${INR(refund)} against bill of ${orig.date} · ${mode}`);
+    if (mode === "Credit") {
+      setExchangeCredit?.({
+        amount: refund,
+        returnId: ret.id,
+        customer: orig.customer || "",
+      });
+      notify(`Return saved — ${INR(refund)} exchange credit is ready in Billing`);
+    } else notify(`Return saved — refund ${INR(refund)} by ${mode}, stock restored`);
+    setReturning(null);
+  };
+
   const deleteSale = (s) => {
+    if (lockedByReturn(s)) return;
     // Reversible → no "are you sure?"; a 5-second Undo re-creates the bill and takes the stock
     // back out (a fresh outbox op, so it is as safe as the original sale).
     voidSale(s);
@@ -294,6 +453,7 @@ export function SalesHistory({
   };
 
   const openEdit = (s) =>
+    !lockedByReturn(s) &&
     setEditing({
       id: s.id,
       date: s.date,
@@ -401,6 +561,7 @@ export function SalesHistory({
   };
 
   const openSplit = (s) =>
+    !lockedByReturn(s) &&
     setSplitting({
       id: s.id,
       time: s.time,
@@ -688,6 +849,7 @@ export function SalesHistory({
                   onSplit={onSplit}
                   onDelete={onDelete}
                   waHref={waHref}
+                  onReturn={onReturn}
                 />
               ))}
             {expanded && list.length > BILLS_PER_DATE && !fullDates.has(date) && (
@@ -734,6 +896,14 @@ export function SalesHistory({
             </button>
           </div>
         </section>
+      )}
+
+      {returning && (
+        <ReturnDialog
+          sale={returning}
+          onClose={() => setReturning(null)}
+          onConfirm={(picks, mode) => confirmReturn(returning, picks, mode)}
+        />
       )}
 
       {editing && (

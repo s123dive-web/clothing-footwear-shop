@@ -120,6 +120,10 @@ export function overlayPendingStock(items, ops) {
 // change and the stock change, so they succeed, retry and replay together.
 // ---------------------------------------------------------------------------------------------
 const stockLine = (l) => !l.misc && l.productId && l.variantId;
+// Units of a line that are currently OUT of stock because of it. Normally its quantity; less
+// whatever has since been returned (feature "returns": `returned` on the line). A return bill's
+// own lines carry a NEGATIVE quantity, so for them this is negative — i.e. stock came back.
+const outQty = (l) => (Number(l.qty) || 0) - (Number(l.returned) || 0);
 
 // Sum signed stock deltas per (product, variant), dropping zeros.
 function netStock(entries) {
@@ -141,7 +145,7 @@ function netStock(entries) {
 export function recordSaleOp(sale) {
   return {
     patch: { ["sales/" + sale.id]: sanitize(sale) },
-    stock: netStock((sale.lines || []).map((l) => [l, -Math.abs(Number(l.qty) || 0)])),
+    stock: netStock((sale.lines || []).map((l) => [l, -outQty(l)])),
   };
 }
 
@@ -155,8 +159,8 @@ export function amendSaleOp(prev, next) {
   return {
     patch,
     stock: netStock([
-      ...(prev.lines || []).map((l) => [l, Math.abs(Number(l.qty) || 0)]), // old qty comes back
-      ...(next.lines || []).map((l) => [l, -Math.abs(Number(l.qty) || 0)]), // new qty goes out
+      ...(prev.lines || []).map((l) => [l, outQty(l)]), // old qty comes back
+      ...(next.lines || []).map((l) => [l, -outQty(l)]), // new qty goes out
     ]),
   };
 }
@@ -165,6 +169,18 @@ export function amendSaleOp(prev, next) {
 export function voidSaleOp(sale) {
   return {
     patch: { ["sales/" + sale.id]: null },
-    stock: netStock((sale.lines || []).map((l) => [l, Math.abs(Number(l.qty) || 0)])),
+    stock: netStock((sale.lines || []).map((l) => [l, outQty(l)])),
+  };
+}
+
+// Return / exchange (feature "returns"): ONE op that adds the return bill, marks the returned
+// quantities on the original bill's lines, and puts the exact variants back into stock.
+export function returnSaleOp(orig, ret, newLines) {
+  return {
+    patch: {
+      ["sales/" + ret.id]: sanitize(ret),
+      [`sales/${orig.id}/lines`]: sanitize(newLines),
+    },
+    stock: recordSaleOp(ret).stock, // return lines have negative qty → positive stock delta
   };
 }

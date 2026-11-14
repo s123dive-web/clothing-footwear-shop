@@ -29,6 +29,7 @@ import {
   recordSaleOp,
   amendSaleOp,
   voidSaleOp,
+  returnSaleOp,
 } from "./lib/ops.js";
 import { openLocalDb, createCacheWriter } from "./lib/localdb.js";
 import { createOutbox } from "./lib/outbox.js";
@@ -687,6 +688,41 @@ function StoreManager({ user, onLogout }) {
       });
   }, [sales, loaded, online]);
 
+  // Returns & exchange (feature "returns"): the return bill, the "returned" marks on the
+  // original and the restock are ONE outbox op.
+  const returnSale = useCallback(
+    (orig, ret, newLines) => {
+      const parts = returnSaleOp(orig, ret, newLines);
+      commitSaleOp(parts, "sale-return");
+      const saved = parts.patch["sales/" + ret.id];
+      const lines = parts.patch[`sales/${orig.id}/lines`];
+      setSales((all) => [
+        ...all.filter((x) => x.id !== ret.id).map((x) => (x.id === orig.id ? { ...x, lines } : x)),
+        saved,
+      ]);
+    },
+    [commitSaleOp]
+  );
+  // Credit from an exchange that has not been spent on a new bill yet. Kept on this device.
+  const [exchangeCredit, setExchangeCreditState] = useState(() => {
+    try {
+      const c = JSON.parse(localStorage.getItem("cfs-exchange-credit-v1") || "null");
+      return c && c.amount > 0 ? c : null;
+    } catch {
+      return null;
+    }
+  });
+  const setExchangeCredit = useCallback((c) => {
+    const next = c && c.amount > 0 ? c : null;
+    setExchangeCreditState(next);
+    try {
+      if (next) localStorage.setItem("cfs-exchange-credit-v1", JSON.stringify(next));
+      else localStorage.removeItem("cfs-exchange-credit-v1");
+    } catch (e) {
+      console.error("exchange credit write failed", e);
+    }
+  }, []);
+
   // Day close (feature "dayClose"): one record per day, written through the outbox.
   const saveDayClose = useCallback((date, rec) => {
     outboxRef.current?.enqueue({
@@ -1147,6 +1183,8 @@ function StoreManager({ user, onLogout }) {
                 goInventory={() => setTab("inventory")}
                 notify={notify}
                 log={addLog}
+                exchangeCredit={exchangeCredit}
+                setExchangeCredit={setExchangeCredit}
               />
             ) : tab === "raw" ? (
               <RawData
@@ -1179,6 +1217,8 @@ function StoreManager({ user, onLogout }) {
                 loadOlderSales={loadOlderSales}
                 notify={notify}
                 log={addLog}
+                returnSale={returnSale}
+                setExchangeCredit={setExchangeCredit}
               />
             ) : tab === "finance" && tabEnabled("finance") ? (
               <AllSalesGate salesFrom={salesFrom} loadOlderSales={loadOlderSales} allowPartial>

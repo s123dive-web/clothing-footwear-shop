@@ -295,3 +295,133 @@ test("restockSuggestions: sell-through, days of stock left and a suggested order
   await expect(page.getByText("M · 6 sold")).toBeVisible();
   await expect(page.getByRole("row", { name: /L · Red/ })).toHaveCount(0); // healthy, unsold
 });
+
+test("gstInvoice: HSN + rate per product, CGST/SGST split on the receipt when a GSTIN is set", async ({
+  page,
+}) => {
+  await enableFeatures(page, ["gstInvoice"]);
+  await dbPut("shop/shopConfig", { name: "GST Shop", gstin: "27ABCDE1234F1Z5" });
+  await login(page);
+  await addProduct(page, KURTI);
+  await page.getByRole("button", { name: "Edit", exact: true }).click();
+  const form = page.getByRole("dialog", { name: "Edit product" });
+  await form.getByLabel("HSN code").fill("6204");
+  await form.getByLabel("GST rate (price includes GST)").selectOption("5");
+  await form.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Product updated")).toBeVisible();
+  await eventually(async () =>
+    expect((await records("items"))[0]).toMatchObject({ hsn: "6204", gstRate: 5 })
+  );
+
+  await gotoTab(page, "Billing (POS)");
+  await sell(page, "M · Red", 2); // ₹1,000 including 5% GST
+  const [sale] = await eventually(async () => {
+    const s = await records("sales");
+    expect(s).toHaveLength(1);
+    return s;
+  });
+  expect(sale.lines[0]).toMatchObject({ gstRate: 5, hsn: "6204", amount: 1000 });
+  expect(sale.total).toBe(1000); // the customer pays the same — tax is inside the price
+
+  const html = await receiptHtml(page, () =>
+    page.getByRole("button", { name: /Print last receipt/ }).click()
+  );
+  expect(html).toContain("TAX INVOICE");
+  expect(html).toContain("GSTIN: 27ABCDE1234F1Z5");
+  expect(html).toContain("HSN 6204 · GST 5%");
+  expect(html).toMatch(
+    /<td>5%<\/td><td class="r">₹952\.38<\/td><td class="r">₹23\.81<\/td><td class="r">₹23\.81<\/td>/
+  );
+  expect(html).toContain("Prices include GST");
+});
+
+test("returns: refund a unit — stock comes back, a negative return bill nets the sales", async ({
+  page,
+}) => {
+  await enableFeatures(page, ["returns"]);
+  await shopWithProduct(page);
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
+  await sell(page, "M · Red", 3); // ₹1,500; M stock 9 → 6
+  await eventually(async () => expect((await records("items"))[0].variants[0].stockQty).toBe(6));
+
+  await gotoTab(page, "Sales History");
+  await page
+    .locator("main div")
+    .filter({ hasText: /·\s*1 item/ })
+    .last()
+    .click();
+  await page.getByRole("button", { name: "↩ Return / exchange" }).click();
+  const dlg = page.getByRole("dialog", { name: "Return / exchange" });
+  await expect(dlg.getByRole("button", { name: "Confirm return" })).toBeDisabled();
+  await dlg.getByRole("button", { name: "Return one more " + KURTI.name }).click();
+  await expect(dlg.getByText("Refund: ₹500")).toBeVisible();
+  await dlg.getByRole("button", { name: "Confirm return" }).click();
+  await expect(page.getByText(/Return saved — refund ₹500 by Cash/)).toBeVisible();
+
+  await eventually(async () => {
+    const sales = await records("sales");
+    expect(sales).toHaveLength(2);
+    const ret = sales.find((s) => s.type === "return");
+    const orig = sales.find((s) => s.type !== "return");
+    expect(ret).toMatchObject({ refOf: orig.id, total: -500, profit: -200, payment: "Cash" });
+    expect(ret.lines[0]).toMatchObject({ qty: -1, amount: -500, size: "M", color: "Red" });
+    expect(orig.lines[0].returned).toBe(1);
+    expect(orig.total).toBe(1500); // the original bill itself is unchanged
+    expect((await records("items"))[0].variants[0].stockQty).toBe(7); // exact variant restocked
+  });
+  // Net sales: the day's total in Sales History is 1,500 − 500.
+  await expect(page.getByText("· 2 bills")).toBeVisible();
+  await expect(page.locator("main")).toContainText("₹1,000");
+  await expect(page.getByText("↩ RETURN", { exact: true })).toBeVisible();
+
+  // The bill is now locked against delete, and only 2 units can still be returned.
+  await page.getByRole("button", { name: "🗑 Delete" }).first().click();
+  await expect(page.getByText(/cannot be edited|has returns against it/).first()).toBeVisible();
+  expect(await records("sales")).toHaveLength(2);
+});
+
+test("returns: exchange — credit from the return is used on a new bill", async ({ page }) => {
+  await enableFeatures(page, ["returns"]);
+  await shopWithProduct(page);
+  await page.getByRole("button", { name: "Cash", exact: true }).click();
+  await sell(page, "M · Red", 1); // ₹500
+  await gotoTab(page, "Sales History");
+  await page
+    .locator("main div")
+    .filter({ hasText: /·\s*1 item/ })
+    .last()
+    .click();
+  await page.getByRole("button", { name: "↩ Return / exchange" }).click();
+  const dlg = page.getByRole("dialog", { name: "Return / exchange" });
+  await dlg.getByRole("button", { name: "Return one more " + KURTI.name }).click();
+  await dlg.getByRole("button", { name: "Credit on new bill" }).click();
+  await dlg.getByRole("button", { name: "Confirm return" }).click();
+  await expect(page.getByText(/₹500 exchange credit is ready in Billing/)).toBeVisible();
+
+  // The customer takes two of the other size instead: ₹1,000 − ₹500 credit = ₹500 to collect.
+  await gotoTab(page, "Billing (POS)");
+  await addToCart(page, KURTI.name, "L · Red", 2);
+  await expect(page.getByText("Credit used ₹500 · To collect ₹500")).toBeVisible();
+  await completeBtn(page).click();
+  await eventually(async () => {
+    const sales = await records("sales");
+    expect(sales).toHaveLength(3);
+    const exchange = sales.find((s) => s.creditUsed);
+    const ret = sales.find((s) => s.type === "return");
+    expect(exchange).toMatchObject({
+      total: 1000,
+      creditUsed: 500,
+      creditOf: ret.id,
+      payment: "UPI", // Billing re-opens on its default mode
+    });
+    expect(ret).toMatchObject({ total: -500, payment: "Credit" });
+    // Net revenue across the three bills: 500 − 500 + 1,000
+    expect(sales.reduce((a, s) => a + s.total, 0)).toBe(1000);
+    const v = Object.fromEntries(
+      (await records("items"))[0].variants.map((x) => [x.size, x.stockQty])
+    );
+    expect(v).toEqual({ M: 9, L: 7 }); // M back to 9; L 9 → 7
+  });
+  // The credit is spent: no banner on the next bill.
+  await expect(page.getByText(/Exchange credit/)).toHaveCount(0);
+});

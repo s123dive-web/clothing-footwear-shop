@@ -130,6 +130,9 @@ export function normalizeProduct(raw) {
   // Optional ledger of stock ops already applied to this product (see lib/ops.js applyStockOp).
   // Carried through untouched so normalising a record never forgets what was applied to it.
   if (r.appliedOps && typeof r.appliedOps === "object") p.appliedOps = r.appliedOps;
+  // Optional GST details (feature "gstInvoice"). Only present once the owner has entered them.
+  if (String(r.hsn ?? "").trim()) p.hsn = String(r.hsn).trim();
+  if (num(r.gstRate) > 0) p.gstRate = num(r.gstRate);
   return p;
 }
 
