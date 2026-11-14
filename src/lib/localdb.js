@@ -40,9 +40,47 @@ function openIdb(idb, name) {
   });
 }
 
+// ---------------------------------------------------------------------------------------------
+// Outbox journal: a tiny SYNCHRONOUS write-ahead list in localStorage, covering the few
+// milliseconds before an op's IndexedDB write commits (see outbox.js). Ops are normally a few
+// hundred bytes; anything huge (a full restore) is skipped rather than risk the quota.
+// ---------------------------------------------------------------------------------------------
+const JOURNAL_KEY = "cfs-outbox-journal-v1";
+const JOURNAL_MAX_OP_BYTES = 200_000;
+export function journal(storage = typeof localStorage !== "undefined" ? localStorage : null) {
+  const read = () => {
+    try {
+      const v = JSON.parse((storage && storage.getItem(JOURNAL_KEY)) || "[]");
+      return Array.isArray(v) ? v : [];
+    } catch {
+      return [];
+    }
+  };
+  const write = (list) => {
+    if (!storage) return;
+    if (list.length) storage.setItem(JOURNAL_KEY, JSON.stringify(list));
+    else storage.removeItem(JOURNAL_KEY);
+  };
+  return {
+    journalAdd(op) {
+      if (!storage) return;
+      const text = JSON.stringify(op);
+      if (text.length > JOURNAL_MAX_OP_BYTES) return;
+      write([...read().filter((o) => o.id !== op.id), JSON.parse(text)]);
+    },
+    journalRemove(id) {
+      if (!storage) return;
+      const list = read();
+      if (list.some((o) => o.id === id)) write(list.filter((o) => o.id !== id));
+    },
+    journalLoad: read,
+  };
+}
+
 function idbBackend(d) {
   return {
     durable: true,
+    ...journal(),
     // → { [slice]: record[] }
     async loadCache() {
       const tx = d.transaction("cache", "readonly");

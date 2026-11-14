@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { createOutbox } from "./outbox.js";
-import { memoryBackend } from "./localdb.js";
+import { memoryBackend, journal } from "./localdb.js";
 import { applyStockOp, stockByProduct, applyPatchToMap } from "./ops.js";
 
 // A tiny stand-in for the server: `patch` writes are absolute sets into `sales`, `stock` deltas
@@ -343,6 +343,87 @@ describe("outbox", () => {
       await tick();
       expect(ob.stuck()).toEqual([]);
       expect(ob.pending()[0].attempts).toBeGreaterThan(3);
+    });
+  });
+
+  describe("journal: the instant between saving a bill and IndexedDB committing it", () => {
+    // A store whose IndexedDB write never finishes — as when the tab is reloaded or killed a
+    // few milliseconds after the sale — but with a working synchronous journal.
+    const storage = () => {
+      const m = new Map();
+      return {
+        getItem: (k) => (m.has(k) ? m.get(k) : null),
+        setItem: (k, v) => m.set(k, String(v)),
+        removeItem: (k) => m.delete(k),
+      };
+    };
+
+    it("an op journalled but never persisted is recovered and delivered on the next start", async () => {
+      const ls = storage();
+      const idb = memoryBackend();
+      const dying = { ...idb, ...journal(ls), putOp: () => new Promise(() => {}) };
+      const a = createOutbox({ store: dying, send: () => new Promise(() => {}) });
+      await a.start();
+      a.enqueue(saleOp(1));
+      a.enqueue(saleOp(2));
+      a.stop(); // tab dies: nothing reached IndexedDB
+      expect(await idb.loadOutbox()).toEqual([]);
+
+      const srv = fakeServer();
+      const next = { ...idb, ...journal(ls) };
+      const b = createOutbox({ store: next, send: async (op) => srv.apply(op) });
+      const pending = await b.start();
+      expect(pending.map((o) => o.id)).toEqual(["op1", "op2"]);
+      await b.settled();
+      await tick();
+      expect(Object.keys(srv.state.sales)).toEqual(["s1", "s2"]);
+      expect(stockOf(srv)).toBe(8);
+      expect(journal(ls).journalLoad()).toEqual([]);
+      expect(await idb.loadOutbox()).toEqual([]);
+    });
+
+    it("the journal entry is dropped as soon as IndexedDB has the op", async () => {
+      const ls = storage();
+      const store = { ...memoryBackend(), ...journal(ls) };
+      const ob = createOutbox({ store, send: () => new Promise(() => {}) });
+      await ob.start();
+      ob.enqueue(saleOp(1));
+      expect(
+        journal(ls)
+          .journalLoad()
+          .map((o) => o.id)
+      ).toEqual(["op1"]); // synchronously there
+      await ob.settled();
+      expect(journal(ls).journalLoad()).toEqual([]);
+      expect((await store.loadOutbox()).map((o) => o.id)).toEqual(["op1"]);
+    });
+
+    it("an op present in both places is replayed once, not twice", async () => {
+      const ls = storage();
+      const idb = memoryBackend();
+      await idb.putOp({ ...saleOp(1), seq: 1 });
+      journal(ls).journalAdd({ ...saleOp(1), seq: 1 });
+      const sent = [];
+      const ob = createOutbox({
+        store: { ...idb, ...journal(ls) },
+        send: async (op) => void sent.push(op.id),
+      });
+      await ob.start();
+      await ob.settled();
+      await tick();
+      expect(sent).toEqual(["op1"]);
+    });
+
+    it("a very large op is not journalled (it would not fit) but is still stored and sent", async () => {
+      const ls = storage();
+      const store = { ...memoryBackend(), ...journal(ls) };
+      const sent = [];
+      const ob = createOutbox({ store, send: async (op) => void sent.push(op.id) });
+      await ob.start();
+      ob.enqueue({ id: "big", patch: { "sales/x": { id: "x", pad: "y".repeat(300_000) } } });
+      expect(journal(ls).journalLoad()).toEqual([]);
+      await ob.settled();
+      expect(sent).toEqual(["big"]);
     });
   });
 });
