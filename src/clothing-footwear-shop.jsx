@@ -1,3 +1,23 @@
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from "react";
+import { isFirebaseConfigured, auth } from "./config/firebase.js";
+import {
+  onAuthStateChanged,
+  signOut,
+  sendPasswordResetEmail,
+  EmailAuthProvider,
+  reauthenticateWithCredential,
+} from "firebase/auth";
+import { Login } from "./screens/Login.jsx";
+import {
+  ALL_SUBCATEGORIES,
+  SUBCATEGORIES_BY_GROUP,
+  GROUPS,
+  guessSubcategory,
+  groupForSubcategory,
+  sizesForProduct,
+  COLOR_SWATCHES,
+  CLOTHING_SIZES,
+} from "./lib/catalog.js";
 import {
   loadCachedConfig,
   DEFAULT_SHOP_CONFIG,
@@ -9,29 +29,6 @@ import {
   validateConfig,
   useShopConfig,
 } from "./config/shopConfig.js";
-import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from "react";
-import {
-  signInWithEmailAndPassword,
-  sendPasswordResetEmail,
-  onAuthStateChanged,
-  signOut,
-  EmailAuthProvider,
-  reauthenticateWithCredential,
-} from "firebase/auth";
-import { auth, isFirebaseConfigured } from "./config/firebase.js";
-import { CSS, S } from "./ui/styles.js";
-import { LOGO_SRC, printReceipt, lineVariantText } from "./lib/print.js";
-import { Field, Header, Section, Card, Empty, Modal, VariantChip, ColorDot } from "./ui/index.jsx";
-import {
-  ALL_SUBCATEGORIES,
-  SUBCATEGORIES_BY_GROUP,
-  GROUPS,
-  guessSubcategory,
-  groupForSubcategory,
-  sizesForProduct,
-  COLOR_SWATCHES,
-  CLOTHING_SIZES,
-} from "./lib/catalog.js";
 import { setCurrencySymbol, CURRENCY } from "./config/currency.js";
 import {
   overlayPendingStock,
@@ -73,6 +70,9 @@ import {
   mergeProductGroup,
 } from "./lib/products.js";
 import { exportXlsx, exportJson, importXlsx } from "./lib/backup.js";
+import { S, CSS } from "./ui/styles.js";
+import { LOGO_SRC, printReceipt, lineVariantText } from "./lib/print.js";
+import { Header, Section, Field, Card, Empty, Modal, VariantChip, ColorDot } from "./ui/index.jsx";
 import {
   buildSeries,
   DASH_PERIODS,
@@ -151,142 +151,6 @@ import {
   lineTotal,
   dailyOutstanding,
 } from "./lib/dailyBills.js";
-
-// ---------- authentication (Firebase email/password) ----------
-// Real server-side auth via Firebase. Data is gated by the database security rules
-// (locked to the shop owner's email), so it is genuinely private — not just a UI gate.
-const AUTH_ERRORS = {
-  "auth/invalid-credential": "Incorrect email or password.",
-  "auth/wrong-password": "Incorrect email or password.",
-  "auth/user-not-found": "No account with that email.",
-  "auth/invalid-email": "That email address looks invalid.",
-  "auth/missing-password": "Please enter your password.",
-  "auth/too-many-requests": "Too many attempts — please wait a minute and retry.",
-  "auth/network-request-failed": "Network error — check your internet connection.",
-  "auth/unauthorized-domain": "This web address isn't authorised in Firebase Auth settings.",
-};
-const authMessage = (code) => AUTH_ERRORS[code] || "Could not sign in. Please try again.";
-
-function Login() {
-  // The Realtime DB config is locked behind auth, so on the sign-in screen we can only use
-  // whatever was cached from a previous session (falling back to defaults for a fresh device).
-  const cfg = loadCachedConfig() || DEFAULT_SHOP_CONFIG;
-  const [email, setEmail] = useState("");
-  const [pwd, setPwd] = useState("");
-  const [err, setErr] = useState("");
-  const [info, setInfo] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const submit = async (e) => {
-    e?.preventDefault();
-    setBusy(true);
-    setErr("");
-    setInfo("");
-    try {
-      await signInWithEmailAndPassword(auth, email.trim(), pwd);
-      // App's auth listener swaps to the dashboard on success.
-    } catch (ex) {
-      setErr(authMessage(ex.code));
-      setBusy(false);
-    }
-  };
-
-  const reset = async () => {
-    if (!email.trim()) return setErr("Enter your email above first, then tap reset.");
-    try {
-      await sendPasswordResetEmail(auth, email.trim());
-      setErr("");
-      setInfo("Password reset link sent to " + email.trim());
-    } catch (ex) {
-      setErr(authMessage(ex.code));
-    }
-  };
-
-  return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "grid",
-        placeItems: "center",
-        background: "#10331F",
-        padding: 16,
-      }}
-    >
-      <style>{CSS}</style>
-      <form
-        onSubmit={submit}
-        style={{
-          background: "#fff",
-          borderRadius: 16,
-          padding: "26px 24px",
-          width: "min(380px, 94vw)",
-          boxShadow: "0 12px 40px rgba(0,0,0,.3)",
-        }}
-      >
-        <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-          <img
-            src={cfg.logoUrl || LOGO_SRC}
-            alt=""
-            style={{ width: 52, height: 52, borderRadius: 12, objectFit: "contain", flexShrink: 0 }}
-            onError={(e) => {
-              e.currentTarget.style.visibility = "hidden";
-            }}
-          />
-          <div>
-            <div style={{ fontWeight: 800, fontSize: 18, letterSpacing: "-0.02em" }}>
-              {cfg.name}
-            </div>
-            <div style={{ fontSize: 11.5, color: "#8A9C90" }}>{cfg.address || cfg.tagline}</div>
-          </div>
-        </div>
-        <h2 style={{ fontSize: 16, margin: "18px 0 12px" }}>Sign in</h2>
-        <Field label="Email">
-          <input
-            className="input"
-            type="email"
-            value={email}
-            autoComplete="username"
-            autoFocus
-            onChange={(e) => setEmail(e.target.value)}
-          />
-        </Field>
-        <Field label="Password">
-          <input
-            className="input"
-            type="password"
-            value={pwd}
-            autoComplete="current-password"
-            onChange={(e) => setPwd(e.target.value)}
-          />
-        </Field>
-        {err && <div style={{ color: "#C44536", fontSize: 13, marginBottom: 8 }}>{err}</div>}
-        {info && <div style={{ color: "#1B5E43", fontSize: 13, marginBottom: 8 }}>{info}</div>}
-        <button className="btn primary big" type="submit" style={{ width: "100%" }} disabled={busy}>
-          {busy ? "Signing in…" : "Sign in"}
-        </button>
-        <button
-          type="button"
-          onClick={reset}
-          style={{
-            display: "block",
-            background: "none",
-            border: "none",
-            color: "#1B5E43",
-            fontSize: 12,
-            marginTop: 10,
-            cursor: "pointer",
-            padding: 0,
-          }}
-        >
-          Forgot password? Email me a reset link
-        </button>
-        <div style={{ fontSize: 11, color: "#8A9C90", marginTop: 12, lineHeight: 1.5 }}>
-          Sign in with your shop account. Your data syncs live across every device that signs in.
-        </div>
-      </form>
-    </div>
-  );
-}
 
 // ---------- Firebase-not-configured screen ----------
 // Shown when src/config/firebase.js still holds placeholder values, so the app degrades to a
