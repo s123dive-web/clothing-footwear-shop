@@ -438,3 +438,68 @@ test("upgrade: the old localStorage cache is moved into IndexedDB once, then rem
   await gotoTab(page, "Inventory");
   await expect(page.getByText("Legacy Cached Saree")).toBeVisible(); // now from IndexedDB
 });
+
+// Found by CI (usability.spec.js, Phase 3): two bills completed offline and the app reloaded at
+// once — the second bill was lost on the CI runner. Most likely its outbox entry had not been
+// committed to IndexedDB yet when the page went away. Since then every op is ALSO written
+// synchronously to a small localStorage journal before the IndexedDB write starts.
+//
+// This test makes the IndexedDB write of the outbox entry never commit (it is aborted) — the
+// same end state as the page dying before the commit — and checks the bill still reaches the
+// cloud after a reload. It fails without the journal.
+test("a bill whose IndexedDB write never committed is recovered from the journal", async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    const put = IDBObjectStore.prototype.put;
+    IDBObjectStore.prototype.put = function (...args) {
+      const req = put.apply(this, args);
+      if (window.__abortOutboxWrites && this.name === "outbox") {
+        try {
+          this.transaction.abort();
+        } catch {
+          /* already finished */
+        }
+      }
+      return req;
+    };
+  });
+  await login(page);
+  await addProduct(page, KURTI);
+  await reopenOffline(page);
+  await page.evaluate(() => (window.__abortOutboxWrites = true));
+  await addToCart(page, KURTI.name, "M · Red", 2);
+  await completeBtn(page).click();
+  await expect(page.getByText(/Saved on this device/)).toBeVisible();
+  await unblockDatabase(page);
+  await page.reload(); // the flag is gone after the reload; IndexedDB never got the op
+  await expect(page.getByText("Online · syncing live")).toBeVisible();
+  await eventually(async () => {
+    expect(await records("sales")).toHaveLength(1);
+    expect(await variantStock(KURTI.name)).toEqual(SOLD_2M);
+  });
+});
+
+// The real-world version of the case above: tap Complete and reload in the same instant.
+test("offline sale + instant reload: the bill is not lost", async ({ page }) => {
+  await login(page);
+  await addProduct(page, KURTI);
+  await reopenOffline(page);
+  await addToCart(page, KURTI.name, "M · Red", 2);
+  // Tap Complete and reload in the SAME task, so the reload starts before any asynchronous
+  // IndexedDB write can commit — the worst case of "the phone was locked right after the sale".
+  await Promise.all([
+    page.waitForEvent("load"),
+    completeBtn(page).evaluate((btn) => {
+      btn.click();
+      location.reload();
+    }),
+  ]);
+  await unblockDatabase(page);
+  await page.reload();
+  await expect(page.getByText("Online · syncing live")).toBeVisible();
+  await eventually(async () => {
+    expect(await records("sales")).toHaveLength(1);
+    expect(await variantStock(KURTI.name)).toEqual(SOLD_2M);
+  });
+});
