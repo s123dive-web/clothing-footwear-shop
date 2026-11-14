@@ -28,6 +28,11 @@
     // through the API. The app hides them from staff on screen; that is a
     // convenience, not a security boundary.
     //
+    // VALIDATION: bills and products also have `.validate` rules (required fields,
+    // numeric types, stock never negative). Before deploying, run Admin → "Check data
+    // against rules" in the app: a stored record that breaks these rules can still be
+    // read and deleted, but can no longer be EDITED until it is fixed.
+    //
     // SETUP: replace the owner email below (every occurrence) with the owner's
     // sign-in email, then deploy:  firebase deploy --only database
     // (Firebase RTDB rules allow these // comments; they're stripped on deploy.)
@@ -43,14 +48,48 @@
         ".read": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'",
         "$saleId": {
           // staff: create or edit, never delete
-          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && newData.exists()"
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && newData.exists()",
+          // ---- shape of a bill (applies to EVERY writer, the owner included; deletes are
+          //      not validated). Mirrors src/lib/validate.js saleProblems — keep them in step.
+          //      Deliberately minimal: the fields every report relies on must exist and be
+          //      the right type. `total` / `qty` may be negative (return bills).
+          ".validate": "newData.hasChildren(['id', 'date', 'total'])",
+          "date": {
+            ".validate": "newData.isString() && newData.val().matches(/^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]$/)"
+          },
+          "total": { ".validate": "newData.isNumber()" },
+          "profit": { ".validate": "newData.isNumber()" },
+          "paid": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "discount": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "payment": { ".validate": "newData.isString()" },
+          "lines": {
+            "$line": {
+              "qty": { ".validate": "newData.isNumber()" },
+              "amount": { ".validate": "newData.isNumber()" },
+              "price": { ".validate": "newData.isNumber()" }
+            }
+          }
         }
       },
       "items": {
         ".read": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'",
         "$itemId": {
           // staff: change an existing product (selling moves its stock), never create or delete
-          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && data.exists() && newData.exists()"
+          ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && data.exists() && newData.exists()",
+          // ---- shape of a product. Mirrors src/lib/validate.js itemProblems. Stock can
+          //      never be stored negative or as text.
+          ".validate": "newData.hasChildren(['id', 'name'])",
+          "name": { ".validate": "newData.isString()" },
+          "sellingPrice": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "purchasePrice": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "mrp": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "stock": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+          "variants": {
+            "$variant": {
+              "stockQty": { ".validate": "newData.isNumber() && newData.val() >= 0" },
+              "lowAt": { ".validate": "newData.isNumber() && newData.val() >= 0" }
+            }
+          }
         }
       },
       "logs": {
@@ -67,6 +106,12 @@
         "billCounters": {
           "$fy": {
             ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff'"
+          }
+        },
+        "errors": {
+          "$errId": {
+            // crash / sync-failure reports (src/lib/errorReport.js): staff may add one
+            ".write": "auth != null && root.child('shop/users').child(auth.uid).child('role').val() == 'staff' && !data.exists() && newData.exists()"
           }
         }
       },

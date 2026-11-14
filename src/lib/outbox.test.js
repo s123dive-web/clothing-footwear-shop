@@ -238,4 +238,111 @@ describe("outbox", () => {
     await tick();
     expect(counts).toEqual([0, 1, 0]);
   });
+
+  describe("writes the server refuses", () => {
+    const denied = () =>
+      Promise.reject(Object.assign(new Error("PERMISSION_DENIED"), { code: "PERMISSION_DENIED" }));
+    const noTimers = {
+      setTimer: (fn) => (noTimers.fns.push(fn), noTimers.fns.length),
+      clearTimer: () => {},
+      fns: [],
+    };
+
+    it("after three refusals an op is stuck: no more automatic retries, but still queued", async () => {
+      noTimers.fns = [];
+      const store = memoryBackend();
+      const send = vi.fn(denied);
+      const ob = createOutbox({
+        store,
+        send,
+        setTimer: noTimers.setTimer,
+        clearTimer: noTimers.clearTimer,
+      });
+      await ob.start();
+      ob.enqueue(saleOp(1));
+      await ob.settled();
+      await tick();
+      for (let i = 0; i < 2; i++) {
+        noTimers.fns.pop()(); // backoff timer fires
+        await tick();
+      }
+      expect(send).toHaveBeenCalledTimes(3);
+      expect(ob.stuck().map((o) => o.id)).toEqual(["op1"]);
+      expect(noTimers.fns).toHaveLength(0); // no further timer was armed
+      expect((await store.loadOutbox()).map((o) => o.id)).toEqual(["op1"]); // never silently dropped
+    });
+
+    it("a stuck op does not hold up the ops behind it", async () => {
+      const store = memoryBackend();
+      const sent = [];
+      const ob = createOutbox({
+        store,
+        send: (op) => (op.id === "op1" ? denied() : Promise.resolve(void sent.push(op.id))),
+        setTimer: () => 1,
+        clearTimer: () => {},
+      });
+      await ob.start();
+      ob.enqueue(saleOp(1));
+      ob.enqueue(saleOp(2));
+      await ob.settled();
+      await tick();
+      expect(sent).toEqual(["op2"]);
+      expect(ob.pending().map((o) => o.id)).toEqual(["op1"]);
+    });
+
+    it("retryNow tries a stuck op again; discard removes it for good", async () => {
+      const store = memoryBackend();
+      let ok = false;
+      const send = vi.fn(() => (ok ? Promise.resolve() : denied()));
+      const ob = createOutbox({
+        store,
+        send,
+        setTimer: () => 1,
+        clearTimer: () => {},
+        backoff: [1],
+      });
+      await ob.start();
+      ob.enqueue(saleOp(1));
+      ob.enqueue(saleOp(2));
+      await ob.settled();
+      for (let i = 0; i < 3; i++) {
+        await tick();
+        ob.retryNow();
+      }
+      await tick();
+      expect(ob.stuck()).toHaveLength(2);
+
+      expect((await ob.discard("op1")).id).toBe("op1");
+      expect(await ob.discard("nope")).toBeNull();
+      expect((await store.loadOutbox()).map((o) => o.id)).toEqual(["op2"]);
+
+      ok = true; // e.g. the owner fixed the record / the rules
+      ob.retryNow();
+      await tick();
+      expect(ob.pending()).toEqual([]);
+      expect(await store.loadOutbox()).toEqual([]);
+    });
+
+    it("a network failure never makes an op stuck", async () => {
+      const store = memoryBackend();
+      const fns = [];
+      const ob = createOutbox({
+        store,
+        send: () => Promise.reject(new Error("network timeout")),
+        setTimer: (fn) => fns.push(fn),
+        clearTimer: () => {},
+      });
+      await ob.start();
+      ob.enqueue(saleOp(1));
+      await ob.settled();
+      for (let i = 0; i < 6; i++) {
+        await tick();
+        const fn = fns.pop();
+        if (fn) fn();
+      }
+      await tick();
+      expect(ob.stuck()).toEqual([]);
+      expect(ob.pending()[0].attempts).toBeGreaterThan(3);
+    });
+  });
 });

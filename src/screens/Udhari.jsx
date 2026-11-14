@@ -471,6 +471,9 @@ export function Udhari({ sales, setSales, notify, log, goBilling }) {
         // closing the modal mid-payment.
         <div
           style={S.overlay}
+          role="dialog"
+          aria-modal="true"
+          aria-label="Record payment"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) setPaying(null);
           }}

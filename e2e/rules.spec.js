@@ -9,6 +9,13 @@ import {
 } from "@firebase/rules-unit-testing";
 import { ref, get, set, update, remove, query, orderByChild, startAt } from "firebase/database";
 import { setLogLevel } from "firebase/app";
+import { saleProblems, itemProblems } from "../src/lib/validate.js";
+import {
+  VALID_SALES,
+  INVALID_SALES,
+  VALID_ITEMS,
+  INVALID_ITEMS,
+} from "../src/lib/validate.samples.js";
 
 setLogLevel("silent"); // every refused write below would otherwise print a warning
 
@@ -150,4 +157,79 @@ test("removing the staff entry removes all access at once", async () => {
   await assertFails(get(ref(staff, "shop/sales")));
   await assertFails(set(ref(staff, "shop/sales/s9"), SALE));
   expect(true).toBe(true);
+});
+
+// ---------------------------------------------------------------------------------------------
+// `.validate` rules for bills and products (Phase 5). The same samples are run through the
+// JavaScript validator (src/lib/validate.js) in the unit tests, so the two must agree.
+// ---------------------------------------------------------------------------------------------
+const key = (rec, i) => (rec.id != null ? String(rec.id) : "noid" + i);
+
+test("valid bills of every shape the app writes are accepted", async () => {
+  for (const [i, s] of VALID_SALES.entries()) {
+    expect(saleProblems(s), JSON.stringify(s)).toEqual([]);
+    await assertSucceeds(set(ref(owner, "shop/sales/" + key(s, i)), s));
+  }
+});
+
+test("invalid bills are refused — even from the owner — and the JS validator agrees", async () => {
+  for (const [i, s] of INVALID_SALES.entries()) {
+    expect(saleProblems(s).length, JSON.stringify(s)).toBeGreaterThan(0);
+    await assertFails(set(ref(owner, "shop/sales/" + key(s, i)), s));
+  }
+});
+
+test("valid products are accepted; negative / non-numeric stock and prices are refused", async () => {
+  for (const [i, it] of VALID_ITEMS.entries()) {
+    expect(itemProblems(it)).toEqual([]);
+    await assertSucceeds(set(ref(owner, "shop/items/" + key(it, i)), it));
+  }
+  for (const [i, it] of INVALID_ITEMS.entries()) {
+    expect(itemProblems(it).length, JSON.stringify(it)).toBeGreaterThan(0);
+    await assertFails(set(ref(owner, "shop/items/" + key(it, i)), it));
+  }
+});
+
+test("validation covers field edits, transactions-style writes and multi-path updates", async () => {
+  // editing one field of a good bill is fine; making it bad is not
+  await assertSucceeds(set(ref(owner, "shop/sales/s1/paid"), 100));
+  await assertFails(set(ref(owner, "shop/sales/s1/total"), "five hundred"));
+  await assertFails(set(ref(owner, "shop/sales/s1/date"), "tomorrow"));
+  await assertFails(remove(ref(owner, "shop/sales/s1/total"))); // would leave a bill with no total
+  // stock can never go negative or become text
+  await assertSucceeds(set(ref(owner, "shop/items/p1/variants/0/stockQty"), 0));
+  await assertFails(set(ref(owner, "shop/items/p1/variants/0/stockQty"), -1));
+  await assertFails(set(ref(staff, "shop/items/p1/variants/0/stockQty"), -1));
+  await assertFails(set(ref(owner, "shop/items/p1/stock"), "5"));
+  // a field patch for a bill that no longer exists would create a broken stub → refused
+  await assertFails(update(ref(owner, "shop"), { "sales/ghost/paid": 50 }));
+  // one bad path refuses the whole multi-path update; nothing is half-written
+  await assertFails(
+    update(ref(owner, "shop"), {
+      "sales/ok1": VALID_SALES[0],
+      "sales/bad1": INVALID_SALES[4],
+    })
+  );
+  expect((await get(ref(owner, "shop/sales/ok1"))).exists()).toBe(false);
+  // deleting is never blocked by validation
+  await assertSucceeds(remove(ref(owner, "shop/sales/s1")));
+  await assertSucceeds(remove(ref(owner, "shop/items/p1")));
+});
+
+test("the date index is declared (queries by date and by payment are indexed)", async () => {
+  const rules = fs.readFileSync("database.rules.json", "utf8");
+  expect(rules).toMatch(/"\.indexOn":\s*\["date",\s*"payment"\]/);
+  await assertSucceeds(
+    get(query(ref(owner, "shop/sales"), orderByChild("date"), startAt("2026-01-01")))
+  );
+});
+
+test("error reports: staff can add one, cannot rewrite or read others' data through it", async () => {
+  await assertSucceeds(
+    set(ref(staff, "shop/meta/errors/e1"), { at: 1, kind: "sync", message: "x" })
+  );
+  await assertFails(set(ref(staff, "shop/meta/errors/e1"), { at: 2, kind: "sync", message: "y" }));
+  await assertFails(remove(ref(staff, "shop/meta/errors/e1")));
+  await assertSucceeds(remove(ref(owner, "shop/meta/errors/e1")));
+  await assertFails(set(ref(stranger, "shop/meta/errors/e2"), { at: 1 }));
 });

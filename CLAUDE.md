@@ -3,6 +3,11 @@
 POS + inventory app for a ladies clothing & footwear shop. **It is in live daily use at a shop
 counter, mostly on a phone, with real sales data.** Read the hard rules before changing anything.
 
+Status: the five hardening phases (0 baseline · 1 data integrity · 2 speed & offline ·
+3 counter usability · 4 optional features · 5 rules & hardening) are complete, each on its own
+`hardening/phase-N` branch and pull request. `docs/QA.md` is the QA report, including every
+manual check still owed on a real phone.
+
 ## Hard rules
 
 1. **Phased and gated.** One hardening phase at a time. End each phase with the report format at
@@ -176,6 +181,17 @@ Flow in `StoreManager`:
      bill back-dated to before the window disappears from view once synced (it is in the
      cloud and shows after "load older"); `older` data is static until reload.
 
+9. **Refused writes.** When the server answers "permission denied" (rules, validation) three
+   times, the op is `stuck`: no more timed retries, it stays in the outbox, the sidebar shows
+   "N not synced", and the `ui/SyncProblems.jsx` dialog offers Retry or Discard (discard
+   reloads the page). Network errors never make an op stuck.
+10. **Error reports.** `lib/errorReport.js` (pure) + `lib/reporter.js` (wiring): crashes
+    (`ErrorBoundary`, `window.onerror`, unhandled rejections) and outbox failures are written to
+    `shop/meta/errors/<id>` — throttled, de-duplicated, capped at 50, never containing shop
+    data. Shown in Admin → Error reports.
+11. Bills read from the cloud pass through `safeSale` (always an array of `lines`), so a
+    malformed record cannot crash a screen. It is not written back.
+
 Sidebar status: `Online · syncing live` / `Offline · N changes waiting to sync` /
 `⚠ N not synced — tap to retry` (failed ops while online).
 
@@ -196,6 +212,7 @@ arrays and empty objects, so every reader must tolerate missing fields.
 | `shop/shopConfig` | single object: `{ name, tagline, address, phone, email, gstin, currency, logoUrl (may be an inline base64 data-URL), receiptFooter, footwearSizeMin, footwearSizeMax }` |
 | `shop/meta/seeded` | `true` once the demo catalogue has been seeded (stops it resurrecting) |
 | `shop/meta/customSubcats/<key>` | `"Display Name"` — owner-added subcategories (key = `subcatKey(name)`) |
+| `shop/meta/errors/<id>` | `{ at, kind: "crash"/"sync", message, stack?, device, user, where?, op?, paths?, attempts? }` — newest 50 |
 | `shop/meta/billCounters/<fy>` | (flag `billNumbers`) `{ next, recent: { <saleId>: n } }` — transaction counter |
 | `shop/meta/lastBackupAt` | (flag `backupReminder`) ms timestamp of the last full backup |
 | `shop/dayCloses/<YYYY-MM-DD>` | (flag `dayClose`) `{ date, opening, expected, counted, diff, at }` |
@@ -212,9 +229,20 @@ Optional fields added by Phase 4 features (present only once the feature has bee
 
 Storage: bill proof files at `shop/bills/<billId>/<file>` (≤ 10 MB).
 
-Rules (`database.rules.json`, `storage.rules`): every read/write requires auth **and** the
-owner's email. `shop/sales` has `.indexOn: ["date", "payment"]` in the file (Phase 2) — the
-owner must deploy it. There is no validation yet (Phase 5).
+Rules (`database.rules.json`, `storage.rules`) — **never deployed by us; the owner deploys**:
+- Owner (by email): full access. Staff (listed at `shop/users/<uid>`): limited, see the file
+  header. Everyone else: nothing.
+- `shop/sales/.indexOn: ["date", "payment"]`.
+- `.validate` on `shop/sales/<id>` and `shop/items/<id>`: id + date (YYYY-MM-DD) + numeric
+  total; name; numeric non-negative prices and stock; numeric line qty / amount / price.
+  `total` and `qty` may be negative (return bills). Validation applies to the owner too and is
+  not run on deletes.
+- **`src/lib/validate.js` is the same checks in JavaScript** (used by Admin → "Check data
+  against rules"). `src/lib/validate.samples.js` feeds identical valid / invalid samples to
+  the unit tests and to `e2e/rules.spec.js`. Change the rules → change `validate.js` and the
+  samples in the same commit.
+- A record that fails validation can be read and deleted but not edited. That is why the data
+  check exists and why it must be run before a rules deploy.
 
 Device-local only: IndexedDB `cfs-local-v1` (cache + outbox); localStorage
 `cfs-shop-config-v1` (config cache) and `cfs-custom-subcats-v1` (local copy of the synced
@@ -244,6 +272,10 @@ read `shop/meta/seeded` and ignore it. Roll back: revert the code; delete the no
 **Phase 1 — bill writes.** Bills are still plain records at `shop/sales/<id>` with the same
 fields; nothing about their shape changed. They are now written by a multi-path update at
 `shop/` instead of at `shop/sales/` — same resulting data.
+
+**Phase 5 — `shop/meta/errors` (new, optional)**, written only when an error happens. Old
+versions ignore it. The validation rules do not change any shape; they refuse writes that do not
+match the existing one. Roll back: revert the rules file (or simply do not deploy it).
 
 **Phase 4 — optional additions only, each written only when its flag is on.** See the tables
 above. Notes on compatibility:
@@ -323,6 +355,8 @@ email (see `resetEmulator` in `e2e/helpers.js`), and sign in.
   off shows and writes nothing" check. `e2e/barcode.spec.js` — typed code, label barcode decoded
   with ZXing, fake-camera scan. `e2e/staff.spec.js` — owner adds / removes staff, staff UI.
   `e2e/rules.spec.js` — `@firebase/rules-unit-testing` against `database.rules.json`.
+- `e2e/hardening.spec.js` — malformed bill, error reporting, refused write (retry / discard),
+  data check.
 - One worker, shared emulator; every test wipes the database first. Tests never use
   `page.waitForTimeout` to "wait for sync" — poll the emulator with `eventually(...)`.
 
@@ -401,9 +435,20 @@ Automated (Playwright `features.spec.js`, `barcode.spec.js`, `staff.spec.js`, `r
 - [ ] Rules: owner full access; staff limited exactly as documented; strangers and signed-out
       get nothing; nobody can grant themselves a role
 
+Automated (Playwright `hardening.spec.js` + the validation part of `rules.spec.js`):
+
+- [ ] A bill with no `lines` renders everywhere and is not rewritten
+- [ ] An uncaught error lands in `shop/meta/errors` and shows in Admin
+- [ ] A refused change: shown, retried, marked "refused by the server", discarded; no stub is
+      written; a sync error report exists
+- [ ] Data check lists exactly the records the rules would refuse
+- [ ] Every valid sample is accepted and every invalid sample refused by BOTH the rules and
+      `validate.js`
+
 Unit (vitest): `outbox.test.js` (write-ahead, order, replay, idempotency, crash mid-replay,
 failure + backoff, retryNow), `ops.test.js`, `localdb.test.js`, `salesWindow.test.js`,
-`print.test.js`, `syncStatus.test.js`, `i18n/i18n.test.js`.
+`print.test.js`, `syncStatus.test.js`, `i18n/i18n.test.js`, `validate.test.js`,
+`errorReport.test.js`, and one test file per Phase 4 library.
 
 Not automated — check by hand on a real phone after anything that touches them:
 
@@ -426,20 +471,23 @@ Not automated — check by hand on a real phone after anything that touches them
 - [ ] After a deploy: "Update available" bar appears; Reload switches version; a bill in
       progress is not lost if Reload is NOT tapped
 
-## Known issues found but not yet scheduled
+## Known issues and limits
 
 - When the cloud catalogue becomes empty (`shop/items` → null) while a device is open or has a
   cache, that device keeps showing its stale products (the null-snapshot branch never clears
   local `items`).
-- A sale whose `lines` is missing/empty (RTDB drops empty arrays) crashes Dashboard
-  (`s.lines.length`). Real bills always have ≥ 1 line; only hand-edited or imported data can
-  hit this.
 - A browser tab left open across a database wipe/restore writes its stale state back.
 - Product add / edit / restock / delete are direct transactions and still wait for the network
   (the form does not close while offline). Only bills, expenses, logs and supplier/vendor
   bills go through the outbox.
 - If IndexedDB is unavailable (some private-browsing modes) the cache and outbox are
   memory-only: the app works, but nothing unsynced survives a reload.
+- Discarding a refused change reloads the page (the local screen cannot otherwise be rolled
+  back to what the cloud has).
+- `ErrorBoundary` → error report is wired but untested end to end (no screen crashes on demand).
+- Staff can read cost / profit through the API (RTDB cannot hide fields).
+- Translation covers menus, Billing and the receipt only; Hindi / Marathi were not reviewed by
+  a native speaker.
 
 ## Report format for every phase
 
