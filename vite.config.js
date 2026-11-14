@@ -21,4 +21,9 @@ export default defineConfig(({ command }) => ({
     },
     chunkSizeWarningLimit: 900,
   },
+  // Vitest: unit tests live next to the code in src/. The Playwright specs in e2e/ are run
+  // by `npm run test:e2e`, never by vitest.
+  test: {
+    include: ["src/**/*.test.{js,jsx}"],
+  },
 }));
