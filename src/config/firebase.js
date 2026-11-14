@@ -19,12 +19,13 @@ import { getStorage, connectStorageEmulator } from "firebase/storage";
 export const firebaseConfig = {
   apiKey: "AIzaSyDkfM9RhnBD1XIxXkQHVXc4EJB57Xsetas",
   authDomain: "vijayclothingfootwareshop.firebaseapp.com",
-  databaseURL: "https://vijayclothingfootwareshop-default-rtdb.asia-southeast1.firebasedatabase.app",
+  databaseURL:
+    "https://vijayclothingfootwareshop-default-rtdb.asia-southeast1.firebasedatabase.app",
   projectId: "vijayclothingfootwareshop",
   storageBucket: "vijayclothingfootwareshop.firebasestorage.app",
   messagingSenderId: "1078004959031",
   appId: "1:1078004959031:web:527c6bac23854485a1bcb2",
-  measurementId: "G-TM4M005MED"
+  measurementId: "G-TM4M005MED",
 };
 
 // True once the placeholders above have been replaced with a real config. The app reads

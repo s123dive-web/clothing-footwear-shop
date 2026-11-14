@@ -2,7 +2,9 @@
 // XLSX is multi-sheet and human-readable in Excel. Products are flattened to one row per
 // size/colour VARIANT (grouped back by product id on import); sales are flattened to one row
 // per line item (grouped by Bill ID) and reconstructed on import.
-import * as XLSX from "xlsx";
+
+// SheetJS is ~490 kB — load it only when an XLSX export / import is actually requested.
+const loadXlsx = () => import("xlsx");
 
 const num = (v) => {
   const n = Number(v);
@@ -21,7 +23,11 @@ export function exportJson(data, filename) {
 }
 
 // ---- XLSX ----
-export function exportXlsx({ items, sales, expenses, logs, vendorBills, dailyBills }, filename) {
+export async function exportXlsx(
+  { items, sales, expenses, logs, vendorBills, dailyBills },
+  filename
+) {
+  const XLSX = await loadXlsx();
   const wb = XLSX.utils.book_new();
 
   // Products → one row per variant (so each row carries the full product context + variant stock).
@@ -233,6 +239,7 @@ export function exportXlsx({ items, sales, expenses, logs, vendorBills, dailyBil
 }
 
 export async function importXlsx(file) {
+  const XLSX = await loadXlsx();
   const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
   const sheet = (name) =>
     wb.Sheets[name] ? XLSX.utils.sheet_to_json(wb.Sheets[name], { defval: "" }) : [];
@@ -290,16 +297,14 @@ export async function importXlsx(file) {
         profit: num(r.billProfit),
         payment: r.payment || "",
       });
-    billMap
-      .get(r.billId)
-      .lines.push({
-        name: r.item,
-        size: r.size || "",
-        color: r.color || "",
-        qty: num(r.qty),
-        price: num(r.price),
-        amount: num(r.amount),
-      });
+    billMap.get(r.billId).lines.push({
+      name: r.item,
+      size: r.size || "",
+      color: r.color || "",
+      qty: num(r.qty),
+      price: num(r.price),
+      amount: num(r.amount),
+    });
   });
   const sales = [...billMap.values()];
 

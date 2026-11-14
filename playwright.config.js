@@ -3,6 +3,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const APP_PORT = 5174; // not 5173, so a normal `npm run dev` can stay open alongside
+const PREVIEW_PORT = 5175;
 const CI = !!process.env.CI;
 
 export default defineConfig({
@@ -22,7 +23,17 @@ export default defineConfig({
     trace: "off",
     screenshot: "only-on-failure",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  projects: [
+    { name: "chromium", testIgnore: "**/pwa.spec.js", use: { ...devices["Desktop Chrome"] } },
+    {
+      // The installable/offline shell is only in a PRODUCTION build, so this project runs
+      // against `vite preview`. pwa.spec.js blocks every non-local request: the production
+      // bundle carries the live Firebase config and must never reach it from a test.
+      name: "pwa",
+      testMatch: "**/pwa.spec.js",
+      use: { ...devices["Desktop Chrome"], baseURL: `http://127.0.0.1:${PREVIEW_PORT}` },
+    },
+  ],
   webServer: [
     {
       command: "npm run emulators",
@@ -41,6 +52,13 @@ export default defineConfig({
       reuseExistingServer: !CI,
       timeout: 60_000,
       env: { BROWSER: "none" }, // vite.config has server.open: true — don't pop a browser
+    },
+    {
+      command: `npm run build && npx vite preview --base /clothing-footwear-shop/ --host 127.0.0.1 --port ${PREVIEW_PORT} --strictPort`,
+      url: `http://127.0.0.1:${PREVIEW_PORT}/clothing-footwear-shop/`,
+      reuseExistingServer: !CI,
+      timeout: 120_000,
+      env: { BROWSER: "none" },
     },
   ],
 });

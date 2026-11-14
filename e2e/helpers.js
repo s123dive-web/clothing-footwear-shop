@@ -158,3 +158,24 @@ export async function unblockDatabase(page) {
   // routeWebSocket handlers are not removed by unrouteAll; replace with a pass-through.
   await page.routeWebSocket(/127\.0\.0\.1:9000/, (ws) => ws.connectToServer());
 }
+
+/**
+ * Click something that prints a receipt and return the receipt HTML. Receipts are printed from a
+ * hidden iframe that removes itself as soon as printing finishes, so its srcdoc is captured the
+ * moment the iframe is added instead of being read afterwards.
+ */
+export async function receiptHtml(page, click) {
+  await page.evaluate(() => {
+    window.__receipt = null;
+    const grab = (frame) => {
+      if (frame.srcdoc) window.__receipt = frame.srcdoc;
+      else setTimeout(() => (window.__receipt = window.__receipt || frame.srcdoc), 0);
+    };
+    new MutationObserver((records) => {
+      for (const r of records) for (const n of r.addedNodes) if (n.tagName === "IFRAME") grab(n);
+    }).observe(document.body, { childList: true });
+  });
+  await click();
+  await expect.poll(() => page.evaluate(() => window.__receipt)).toBeTruthy();
+  return page.evaluate(() => window.__receipt);
+}

@@ -11,6 +11,11 @@ vi.mock("firebase/database", () => ({
   update: vi.fn(),
   runTransaction: vi.fn(),
   get: vi.fn(),
+  query: vi.fn(),
+  orderByChild: vi.fn(),
+  startAt: vi.fn(),
+  endAt: vi.fn(),
+  equalTo: vi.fn(),
 }));
 
 const { toMap, mapToArray, isLegacyShape, buildSliceUpdate, mergeRemote, sanitize } =

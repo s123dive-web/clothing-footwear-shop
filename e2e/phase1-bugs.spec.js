@@ -216,12 +216,13 @@ test("BUG 5 · a large shop (> 5 MB of data) still opens offline from the local 
   test.setTimeout(120_000);
   // ~1,800 bills × 20 lines ≈ 7 MB of JSON — a couple of busy years.
   const sales = {};
-  const day = (n) => new Date(Date.UTC(2025, 0, 1 + n)).toISOString().slice(0, 10);
+  // All within the last 60 days, i.e. inside the live sales window, so all ~7 MB is loaded.
+  const day = (n) => new Date(Date.now() - (n % 60) * 86400000).toISOString().slice(0, 10);
   for (let i = 0; i < 1800; i++) {
     const id = "big" + String(i).padStart(5, "0");
     sales[id] = {
       id,
-      date: day(i % 600),
+      date: day(i),
       time: "11:00 am",
       payment: "Cash",
       total: 10000,
