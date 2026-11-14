@@ -1,116 +1,111 @@
-import { useState, useEffect, useMemo, useRef, useCallback, Fragment } from "react";
 import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  BarChart,
-  Bar,
-  LineChart,
-  Line,
-  ComposedChart,
-  Treemap,
-  ReferenceLine,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from "recharts";
+  loadCachedConfig,
+  DEFAULT_SHOP_CONFIG,
+  subscribeShopConfig,
+  cacheConfig,
+  normalizeConfig,
+  saveShopConfig,
+  ShopConfigContext,
+  validateConfig,
+  useShopConfig,
+} from "./config/shopConfig.js";
+import { useState, useEffect, useRef, useMemo, useCallback, Fragment } from "react";
 import {
-  onAuthStateChanged,
   signInWithEmailAndPassword,
-  signOut,
   sendPasswordResetEmail,
+  onAuthStateChanged,
+  signOut,
   EmailAuthProvider,
   reauthenticateWithCredential,
 } from "firebase/auth";
 import { auth, isFirebaseConfigured } from "./config/firebase.js";
-import { CURRENCY, setCurrencySymbol } from "./config/currency.js";
+import { CSS, S } from "./ui/styles.js";
+import { LOGO_SRC, printReceipt, lineVariantText } from "./lib/print.js";
+import { Field, Header, Section, Card, Empty, Modal, VariantChip, ColorDot } from "./ui/index.jsx";
 import {
-  DEFAULT_SHOP_CONFIG,
-  ShopConfigContext,
-  useShopConfig,
-  normalizeConfig,
-  validateConfig,
-  loadCachedConfig,
-  cacheConfig,
-  subscribeShopConfig,
-  saveShopConfig,
-} from "./config/shopConfig.js";
-import {
-  GROUPS,
-  SUBCATEGORIES_BY_GROUP,
   ALL_SUBCATEGORIES,
+  SUBCATEGORIES_BY_GROUP,
+  GROUPS,
+  guessSubcategory,
   groupForSubcategory,
-  CLOTHING_SIZES,
   sizesForProduct,
   COLOR_SWATCHES,
-  guessSubcategory,
-  subcatIcon,
+  CLOTHING_SIZES,
 } from "./lib/catalog.js";
+import { setCurrencySymbol, CURRENCY } from "./config/currency.js";
 import {
-  blankProduct,
-  blankVariant,
-  productStock,
-  productLowVariants,
-  isProductLow,
-  variantLabel,
-  applyVariantDelta,
-  normalizeProduct,
-  mergeProductGroup,
-  buildSeedProducts,
-} from "./lib/products.js";
-import {
-  toMap,
-  mapToArray,
-  isLegacyShape,
-  buildSliceUpdate,
-  mergeRemote,
-  overwriteSlice,
-  subscribeSlice,
-  subscribeConnection,
-  updateItemAtomic,
-  readMeta,
-  writeMeta,
-  sendOp,
-  subscribeCustomSubcats,
-  CUSTOM_SUBCATS_PATH,
-  subcatKey,
-  SLICES,
-} from "./lib/sync.js";
-import { openLocalDb, createCacheWriter } from "./lib/localdb.js";
-import { createOutbox } from "./lib/outbox.js";
-import {
-  applyPatchToMap,
-  applyOpsToMap,
   overlayPendingStock,
+  applyOpsToMap,
+  applyPatchToMap,
   recordSaleOp,
   amendSaleOp,
   voidSaleOp,
 } from "./lib/ops.js";
+import { openLocalDb, createCacheWriter } from "./lib/localdb.js";
+import { createOutbox } from "./lib/outbox.js";
+import {
+  sendOp,
+  SLICES,
+  toMap,
+  mapToArray,
+  subscribeSlice,
+  readMeta,
+  overwriteSlice,
+  writeMeta,
+  isLegacyShape,
+  mergeRemote,
+  subscribeConnection,
+  buildSliceUpdate,
+  subscribeCustomSubcats,
+  CUSTOM_SUBCATS_PATH,
+  subcatKey,
+} from "./lib/sync.js";
+import { todayStr, uid, money, dateStr, INR } from "./lib/format.js";
+import {
+  buildSeedProducts,
+  normalizeProduct,
+  isProductLow,
+  productStock,
+  productLowVariants,
+  variantLabel,
+  blankProduct,
+  blankVariant,
+  mergeProductGroup,
+} from "./lib/products.js";
+import { exportXlsx, exportJson, importXlsx } from "./lib/backup.js";
+import {
+  AreaChart,
+  CartesianGrid,
+  XAxis,
+  YAxis,
+  Tooltip,
+  Area,
+  BarChart,
+  Bar,
+  Legend,
+  ResponsiveContainer,
+  Cell,
+  LineChart,
+  Line,
+  PieChart,
+  Pie,
+  ComposedChart,
+  ReferenceLine,
+  Treemap,
+} from "recharts";
+import { iconFor, LOG_TYPES } from "./lib/domain.js";
+import { cloudWriteProduct, cloudDeleteProduct, cloudRestockVariant } from "./lib/cloudProducts.js";
 import { parseFile, parseRawText } from "./lib/parse.js";
-import { exportJson, exportXlsx, importXlsx } from "./lib/backup.js";
-import { uploadBillProof, deleteBillProof, PROOF_ACCEPT, MAX_PROOF_BYTES } from "./lib/bills.js";
 import {
-  PAYMENT_METHODS,
-  PAYMENT_STATUS,
-  SUPPLIER_CATEGORIES,
-  itemsForCategory,
-  blankDailyBill,
-  validateDailyBill,
-  dailyOutstanding,
-  makeDailyBill,
-  dailyToVendorBill,
-  upsertMirror,
-  lineTotal,
-} from "./lib/dailyBills.js";
-import {
-  formatINR,
   inrCompact,
+  formatINR,
+  hourLabel,
+  DOW_ORDER,
+  DOW,
   summarize,
+  expenseByMonth,
+  expenseBreakdown,
+  expenseTotal,
   dailyRevenueSeries,
   monthlyRevenueProfit,
   salesHeatmap,
@@ -120,158 +115,25 @@ import {
   inventoryValue,
   inventoryByCategory,
   deadStock,
-  breakEvenSeries,
-  breakEvenEstimate,
-  expenseTotal,
-  expenseByMonth,
-  expenseBreakdown,
   salesByCategory,
   topSizes,
-  DOW,
-  DOW_ORDER,
-  hourLabel,
+  breakEvenSeries,
+  breakEvenEstimate,
 } from "./lib/stats.js";
-
-// ---------- helpers ----------
-// Format money with the shop's configured currency symbol (defaults to ₹).
-const INR = (n) =>
-  CURRENCY.symbol + Number(n || 0).toLocaleString("en-IN", { maximumFractionDigits: 2 });
-// Round money to 2 decimals so bill totals don't drift (e.g. 0.1 + 0.2 = 0.30000004).
-// A non-numeric input collapses to 0 rather than poisoning a total with NaN.
-const money = (n) => {
-  const v = Number(n);
-  return Number.isFinite(v) ? Math.round((v + Number.EPSILON) * 100) / 100 : 0;
-};
-// Local calendar date as YYYY-MM-DD. MUST be local, not toISOString() (which is UTC)
-// — otherwise early-morning sales in IST get filed under the previous day.
-const dateStr = (d) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-const todayStr = () => dateStr(new Date());
-const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
-const escapeHtml = (s) =>
-  String(s).replace(
-    /[&<>"']/g,
-    (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]
-  );
-
-// Brand + payment assets (served from /public). BASE_URL is "/" in dev and the repo
-// sub-path on GitHub Pages, so these resolve correctly in both. assetUrl() makes them
-// absolute for the print window (about:blank, which can't resolve relative paths).
-const BASE = import.meta.env.BASE_URL;
-const LOGO_SRC = BASE + "logo.jpg";
-const PAYMENT_QR_SRC = BASE + "payment-qr.jpg";
-const assetUrl = (p) => (typeof location !== "undefined" ? location.origin : "") + p;
-
-// Print an HTML document via a hidden iframe. Mobile browsers block window.open popups,
-// so the old "open a new window and print" approach silently failed on phones — an iframe
-// prints from within the current page (the click is a user gesture) and works everywhere.
-function printHtml(html, title) {
-  const iframe = document.createElement("iframe");
-  iframe.setAttribute("aria-hidden", "true");
-  Object.assign(iframe.style, {
-    position: "fixed",
-    right: "0",
-    bottom: "0",
-    width: "0",
-    height: "0",
-    border: "0",
-  });
-
-  let cleaned = false;
-  const cleanup = () => {
-    if (cleaned) return;
-    cleaned = true;
-    try {
-      document.body.removeChild(iframe);
-    } catch {
-      /* already gone */
-    }
-  };
-
-  iframe.onload = () => {
-    // Small delay so logo/QR images finish painting before the print dialog opens.
-    setTimeout(() => {
-      try {
-        const win = iframe.contentWindow;
-        win.focus();
-        win.onafterprint = cleanup;
-        win.print();
-        setTimeout(cleanup, 60000); // safety net: afterprint doesn't fire on every mobile browser
-      } catch (err) {
-        console.error("print failed", err);
-        cleanup();
-        const w = window.open("", "_blank"); // last-ditch fallback
-        if (w) {
-          w.document.write(html);
-          w.document.close();
-        }
-      }
-    }, 250);
-  };
-
-  document.body.appendChild(iframe);
-  // srcdoc gives a single load event after content + images, and works on mobile Safari/Chrome.
-  iframe.srcdoc = `<!doctype html><html><head><meta charset="utf-8"><title>${escapeHtml(title || "Print")}</title></head><body>${html}</body></html>`;
-}
-
-// Variant descriptor for a receipt/history line: "Size M · Maroon" (only the parts present).
-const lineVariantText = (l) =>
-  [l.size ? "Size " + l.size : "", l.color || ""].filter(Boolean).join(" · ");
-
-// Build a thermal-style receipt and send it to the printer. `config` is the shop config
-// (name, address, gstin, phone, receipt footer, currency, logo) — nothing is hardcoded.
-function printReceipt(sale, config = DEFAULT_SHOP_CONFIG) {
-  const rows = sale.lines
-    .map((l) => {
-      const vt = lineVariantText(l);
-      return `<tr><td>${escapeHtml(l.name)}${vt ? `<div class="var">${escapeHtml(vt)}</div>` : ""}</td><td class="c">${l.qty}</td><td class="r">${INR(l.amount)}</td></tr>`;
-    })
-    .join("");
-  const logo = config.logoUrl || assetUrl(LOGO_SRC);
-  printHtml(
-    `<style>body{font-family:'Courier New',monospace;padding:10px;width:280px;color:#000}
-    h2{text-align:center;margin:4px 0}.meta{text-align:center;font-size:11px}
-    .logo{display:block;margin:0 auto 2px;height:46px;object-fit:contain}
-    table{width:100%;border-collapse:collapse;font-size:12px;margin-top:6px}
-    td{padding:2px 0}.c{text-align:center}.r{text-align:right}
-    .var{font-size:10px;color:#333}
-    .tot td{border-top:1px dashed #000;font-weight:bold;padding-top:4px}
-    .ft{text-align:center;font-size:11px;margin-top:8px;border-top:1px dashed #000;padding-top:6px;white-space:pre-line}
-    .pay{text-align:center;margin-top:10px;border-top:1px dashed #000;padding-top:8px}
-    .pay img{width:150px;height:150px;object-fit:contain}
-    .pay .lbl{font-size:11px;font-weight:bold;margin-top:2px}</style>
-    <img class="logo" src="${escapeHtml(logo)}" alt="" onerror="this.style.display='none'" />
-    <h2>${escapeHtml(config.name)}</h2>
-    ${config.address ? `<div class="meta">${escapeHtml(config.address)}</div>` : ""}
-    ${config.phone ? `<div class="meta">☎ ${escapeHtml(config.phone)}</div>` : ""}
-    ${config.gstin ? `<div class="meta">GSTIN: ${escapeHtml(config.gstin)}</div>` : ""}
-    <div class="meta">${escapeHtml(sale.date)} &nbsp; ${escapeHtml(sale.time)}</div>
-    <table>${rows}
-    ${
-      sale.discount > 0
-        ? `<tr><td>Subtotal</td><td></td><td class="r">${INR(sale.subtotal != null ? sale.subtotal : money((sale.total || 0) + sale.discount))}</td></tr>
-    <tr><td>Discount${sale.discountPct ? " (" + sale.discountPct + "%)" : ""}</td><td></td><td class="r">−${INR(sale.discount)}</td></tr>`
-        : ""
-    }
-    <tr class="tot"><td>TOTAL</td><td></td><td class="r">${INR(sale.total)}</td></tr>
-    </table>
-    ${sale.payment ? `<div class="meta">Paid via ${escapeHtml(sale.payment)}${sale.customer ? " — " + escapeHtml(sale.customer) : ""}</div>` : ""}
-    ${sale.customer || sale.mobile ? `<div class="meta">Customer: ${escapeHtml(sale.customer || "—")}${sale.mobile ? " · " + escapeHtml(sale.mobile) : ""}</div>` : ""}
-    ${sale.payment === "Udhari" ? `<div class="meta">Paid now: ${INR(sale.paid || 0)}${sale.paidMode ? " (" + escapeHtml(sale.paidMode) + ")" : ""} &nbsp; Balance due: ${INR(Math.max(0, (sale.total || 0) - (sale.paid || 0)))}</div>` : ""}
-    ${config.receiptFooter ? `<div class="ft">${escapeHtml(config.receiptFooter)}</div>` : ""}
-    <div class="pay">
-      <img src="${assetUrl(PAYMENT_QR_SRC)}" alt="Scan to pay" onerror="this.style.display='none'" />
-      <div class="lbl">Scan to Pay · UPI</div>
-    </div>`,
-    "Receipt"
-  );
-}
-// ---------- apparel domain glue ----------
-// Activity-log categories (generic; unchanged across domains).
-const LOG_TYPES = ["sale", "inventory", "expense", "import", "backup", "bill"];
-
-// A product's display icon: its own stored icon, else derived from its subcategory / group.
-const iconFor = (p) => (p && p.icon) || subcatIcon(p && p.subcategory, p && p.category);
+import { MAX_PROOF_BYTES, uploadBillProof, deleteBillProof, PROOF_ACCEPT } from "./lib/bills.js";
+import {
+  blankDailyBill,
+  validateDailyBill,
+  makeDailyBill,
+  dailyToVendorBill,
+  upsertMirror,
+  SUPPLIER_CATEGORIES,
+  PAYMENT_METHODS,
+  PAYMENT_STATUS,
+  itemsForCategory,
+  lineTotal,
+  dailyOutstanding,
+} from "./lib/dailyBills.js";
 
 // ---------- authentication (Firebase email/password) ----------
 // Real server-side auth via Firebase. Data is gated by the database security rules
@@ -558,43 +420,6 @@ const slugify = (s) =>
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "") || "shop";
-
-// ---------------------------------------------------------------------------
-// Cloud product writes (the `items` slice). Every write is a Firebase transaction, so two
-// devices changing stock at the same time apply their deltas on top of the freshest server
-// value instead of clobbering each other (fixes the grocery app's silent-overwrite bug).
-// Local product state is refreshed by the onValue echo — Firebase surfaces local writes to the
-// listener immediately, so the UI updates instantly and offline edits still show this session.
-// ---------------------------------------------------------------------------
-
-// Create or replace a whole product record (metadata + variant structure). Preserves createdAt
-// and bumps the version; when editing an existing record, untouched server fields are replaced
-// by the passed product (the caller edits a snapshot, so this is an intentional owner override).
-async function cloudWriteProduct(product) {
-  const p = normalizeProduct(product);
-  await updateItemAtomic(p.id, (curr) => ({
-    ...p,
-    createdAt: (curr && curr.createdAt) || p.createdAt || todayStr(),
-    updatedAt: todayStr(),
-    version: ((curr && curr.version) || 0) + 1,
-    // Keep the ledger of already-applied stock ops (lib/ops.js) across an owner edit.
-    ...(curr && curr.appliedOps ? { appliedOps: curr.appliedOps } : {}),
-  }));
-  return p.id;
-}
-
-// Delete a product (transaction returning null removes the node).
-const cloudDeleteProduct = (id) => updateItemAtomic(id, () => null);
-
-// Atomically add stock to one variant (restock).
-const cloudRestockVariant = (productId, variantId, qty) =>
-  updateItemAtomic(productId, (curr) => {
-    if (!curr) return curr;
-    const p = applyVariantDelta(normalizeProduct(curr), variantId, Math.abs(Number(qty) || 0));
-    p.updatedAt = todayStr();
-    p.version = (curr.version || 0) + 1;
-    return p;
-  });
 
 // NOTE: stock changes caused by a BILL (sale / edit / delete) do not use the helpers above. They
 // travel in the same outbox op as the bill itself (lib/ops.js recordSaleOp / amendSaleOp /
@@ -2860,53 +2685,6 @@ const normName = (s) =>
     .trim()
     .toLowerCase()
     .replace(/\s+/g, " ");
-
-// A colour swatch dot for the variant chips / pickers.
-const ColorDot = ({ color }) => {
-  const hit = COLOR_SWATCHES.find(
-    (c) => c.name.toLowerCase() === String(color || "").toLowerCase()
-  );
-  const bg = hit ? hit.hex : "#CBD3CC";
-  return (
-    <span
-      style={{
-        display: "inline-block",
-        width: 10,
-        height: 10,
-        borderRadius: "50%",
-        background: bg,
-        border: "1px solid rgba(0,0,0,.15)",
-        marginRight: 4,
-        verticalAlign: "middle",
-      }}
-    />
-  );
-};
-
-// One small chip per variant: "M · Maroon ×4" (red when at/below its low threshold).
-const VariantChip = ({ v }) => {
-  const low = (Number(v.stockQty) || 0) <= (Number(v.lowAt) || 0);
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 2,
-        fontSize: 11.5,
-        padding: "2px 7px",
-        borderRadius: 20,
-        marginRight: 5,
-        marginBottom: 4,
-        background: low ? "#FBECEF" : "#F1F4F1",
-        color: low ? "#B0324C" : "#3A5547",
-        border: "1px solid " + (low ? "#F0CDD6" : "#E2EAE3"),
-      }}
-    >
-      {v.color ? <ColorDot color={v.color} /> : null}
-      {variantLabel(v)} <b style={{ marginLeft: 2 }}>×{Number(v.stockQty) || 0}</b>
-    </span>
-  );
-};
 
 function Inventory({ items, notify, log, cats = ALL_SUBCATEGORIES, onAddCategory }) {
   const config = useShopConfig();
@@ -9413,295 +9191,3 @@ function Admin({ items, setSales, setExpenses, setLogs, user, notify, log }) {
     </div>
   );
 }
-
-const Header = ({ title, sub, children }) => (
-  <div style={{ display: "flex", alignItems: "flex-end", marginBottom: 18, gap: 12 }}>
-    <div>
-      <h1 style={{ margin: 0, fontSize: 24, letterSpacing: "-0.03em" }}>{title}</h1>
-      {sub && <div style={{ color: "#6B7E74", fontSize: 13, marginTop: 2 }}>{sub}</div>}
-    </div>
-    <div style={{ marginLeft: "auto" }}>{children}</div>
-  </div>
-);
-
-const Card = ({ label, value, sub, accent }) => (
-  <div style={{ ...S.card, ...(accent ? { background: "#1B5E43", color: "#fff" } : {}) }}>
-    <div
-      style={{
-        fontSize: 11.5,
-        textTransform: "uppercase",
-        letterSpacing: "0.07em",
-        color: accent ? "#A8CDBA" : "#7A8C81",
-      }}
-    >
-      {label}
-    </div>
-    <div
-      style={{
-        fontSize: 24,
-        fontWeight: 800,
-        margin: "6px 0 2px",
-        fontVariantNumeric: "tabular-nums",
-      }}
-    >
-      {value}
-    </div>
-    <div style={{ fontSize: 12, color: accent ? "#C8E2D4" : "#8A9C90" }}>{sub}</div>
-  </div>
-);
-
-const Field = ({ label, children }) => (
-  <label style={{ display: "block", marginBottom: 10 }}>
-    <div style={{ fontSize: 12, fontWeight: 600, color: "#465", marginBottom: 4 }}>{label}</div>
-    {children}
-  </label>
-);
-
-const Empty = ({ text, children }) => (
-  <div style={{ padding: "22px 10px", textAlign: "center", color: "#8A9", fontSize: 13 }}>
-    {text}
-    {children && <div style={{ marginTop: 10 }}>{children}</div>}
-  </div>
-);
-
-const Section = ({ title, children }) => (
-  <section style={{ ...S.panel, marginBottom: 16 }}>
-    {title && <div style={S.panelHead}>{title}</div>}
-    {children}
-  </section>
-);
-
-function Modal({ title, children, onClose }) {
-  // Only close when the *press* started on the backdrop itself. Relying on the
-  // click target alone closed the dialog whenever a drag (e.g. selecting digits
-  // in a number field) began inside an input but released on the overlay.
-  const downOnOverlay = useRef(false);
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-  return (
-    <div
-      style={S.overlay}
-      onMouseDown={(e) => {
-        downOnOverlay.current = e.target === e.currentTarget;
-      }}
-      onClick={(e) => {
-        if (e.target === e.currentTarget && downOnOverlay.current) onClose();
-      }}
-      role="dialog"
-      aria-modal="true"
-      aria-label={title}
-    >
-      <div style={S.modal}>
-        <div style={{ display: "flex", alignItems: "center", marginBottom: 14 }}>
-          <h2 style={{ margin: 0, fontSize: 17 }}>{title}</h2>
-          <button
-            className="btn ghost small"
-            style={{ marginLeft: "auto" }}
-            aria-label="Close dialog"
-            onClick={onClose}
-          >
-            ✕
-          </button>
-        </div>
-        {children}
-      </div>
-    </div>
-  );
-}
-
-// ---------- styles ----------
-const S = {
-  app: {
-    display: "flex",
-    minHeight: "100vh",
-    background: "#EFF3EE",
-    fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
-    color: "#1E2421",
-  },
-  nav: {
-    width: 210,
-    background: "#10331F",
-    color: "#E6F0E9",
-    display: "flex",
-    flexDirection: "column",
-    gap: 4,
-    padding: "16px 10px",
-    position: "sticky",
-    top: 0,
-    height: "100vh",
-    boxSizing: "border-box",
-  },
-  logo: { display: "flex", gap: 10, alignItems: "center", padding: "4px 8px 18px" },
-  logoMark: {
-    width: 38,
-    height: 38,
-    borderRadius: 10,
-    background: "#E8A33D",
-    color: "#10331F",
-    display: "grid",
-    placeItems: "center",
-    fontWeight: 800,
-    fontSize: 17,
-  },
-  main: {
-    flex: 1,
-    padding: "26px 30px",
-    maxWidth: 1280,
-    margin: "0 auto",
-    width: "100%",
-    boxSizing: "border-box",
-  },
-  cards: { display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 14 },
-  card: { background: "#fff", borderRadius: 14, padding: "16px 18px", border: "1px solid #E2EAE3" },
-  panel: { background: "#fff", borderRadius: 14, padding: 16, border: "1px solid #E2EAE3" },
-  panelHead: {
-    fontWeight: 800,
-    fontSize: 13.5,
-    textTransform: "uppercase",
-    letterSpacing: "0.05em",
-    color: "#3A5547",
-    display: "flex",
-    alignItems: "center",
-    marginBottom: 10,
-  },
-  row: {
-    display: "flex",
-    justifyContent: "space-between",
-    padding: "8px 2px",
-    borderBottom: "1px dashed #E5ECE6",
-    fontSize: 13.5,
-  },
-  receipt: {
-    background: "#FFFDF6",
-    borderRadius: 4,
-    padding: "18px 16px",
-    border: "1px solid #E8E2CF",
-    boxShadow: "0 2px 10px rgba(40,60,40,.07)",
-    alignSelf: "start",
-    backgroundImage:
-      "repeating-linear-gradient(transparent, transparent 27px, rgba(180,170,140,.12) 28px)",
-  },
-  receiptHead: {
-    textAlign: "center",
-    fontWeight: 800,
-    letterSpacing: "0.25em",
-    fontSize: 12,
-    color: "#6B6347",
-    borderBottom: "2px dashed #D8D0B8",
-    paddingBottom: 10,
-    marginBottom: 8,
-  },
-  rcptLine: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    padding: "7px 0",
-    borderBottom: "1px dotted #E0D9C4",
-  },
-  rcptTotal: {
-    display: "flex",
-    justifyContent: "space-between",
-    fontWeight: 800,
-    fontSize: 18,
-    paddingTop: 12,
-    marginTop: 6,
-    borderTop: "2px dashed #C9BF9F",
-  },
-  badge: {
-    background: "#C44536",
-    color: "#fff",
-    fontSize: 10.5,
-    fontWeight: 800,
-    borderRadius: 9,
-    padding: "1px 7px",
-    marginLeft: 8,
-  },
-  badgeInline: {
-    background: "#FBECEF",
-    color: "#B0324C",
-    fontSize: 10,
-    fontWeight: 800,
-    borderRadius: 6,
-    padding: "1px 6px",
-    marginLeft: 6,
-    textTransform: "uppercase",
-    letterSpacing: ".04em",
-  },
-  toast: {
-    position: "fixed",
-    bottom: 24,
-    left: "50%",
-    transform: "translateX(-50%)",
-    background: "#10331F",
-    color: "#fff",
-    padding: "10px 20px",
-    borderRadius: 10,
-    fontSize: 13.5,
-    boxShadow: "0 6px 20px rgba(0,0,0,.25)",
-    zIndex: 60,
-  },
-  overlay: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(15,30,20,.45)",
-    display: "grid",
-    placeItems: "center",
-    zIndex: 50,
-  },
-  modal: {
-    background: "#fff",
-    borderRadius: 16,
-    padding: 20,
-    width: "min(480px, 92vw)",
-    maxHeight: "86vh",
-    overflow: "auto",
-  },
-};
-
-const CSS = `
-  .navbtn { display:flex; align-items:center; gap:6px; width:100%; text-align:left; background:none; border:none; color:#BCD2C4; padding:10px 12px; border-radius:9px; font-size:13.5px; font-weight:600; cursor:pointer; position:relative; }
-  .navbtn:hover { background:#1A4A2E; color:#fff; }
-  .navbtn.active { background:#1B5E43; color:#fff; }
-  .navbtn.sub { padding-left:26px; font-size:13px; color:#A8C2B4; }
-  .navbtn.sub::before { content:""; position:absolute; left:14px; top:9px; bottom:9px; width:2px; background:#2A5A3E; border-radius:2px; }
-  .input { width:100%; box-sizing:border-box; padding:10px 12px; border:1.5px solid #D5E0D6; border-radius:9px; font-size:14px; background:#fff; outline:none; font-family:inherit; }
-  .input:focus { border-color:#1B5E43; box-shadow:0 0 0 3px rgba(27,94,67,.12); }
-  .btn { border:none; border-radius:9px; padding:9px 16px; font-size:13.5px; font-weight:700; cursor:pointer; background:#E4ECE5; color:#23402F; font-family:inherit; }
-  .btn:hover { filter:brightness(.96); }
-  .btn.primary { background:#1B5E43; color:#fff; }
-  .btn.big { padding:13px 18px; font-size:15px; }
-  .btn.ghost { background:transparent; border:1.5px solid #CFDCD1; }
-  .btn.small { padding:5px 10px; font-size:12px; }
-  .btn.danger { background:#FBEAE7; color:#C44536; }
-  .pick { text-align:left; background:#F6FAF6; border:1.5px solid #DDE8DE; border-radius:11px; padding:10px 12px; cursor:pointer; font-family:inherit; }
-  .pick:hover:not(:disabled) { border-color:#1B5E43; background:#fff; }
-  .pick:disabled { opacity:.7; cursor:not-allowed; background:#F0F2F0; }
-  .qty { width:26px; height:26px; border-radius:7px; border:1.5px solid #D0C7AB; background:#fff; font-size:15px; font-weight:700; cursor:pointer; line-height:1; }
-  .seg { border:none; background:#F1ECEF; color:#5E4A54; padding:7px 12px; font-size:13px; font-weight:700; cursor:pointer; font-family:inherit; }
-  .seg.wide { flex:1; border-radius:8px; }
-  .seg.on { background:#8E2C48; color:#fff; }
-  .chipbtn { display:inline-flex; align-items:center; gap:3px; border:1.5px solid #E1D4DA; background:#fff; color:#4A3A42; border-radius:16px; padding:4px 10px; font-size:12px; font-weight:600; cursor:pointer; margin:0 5px 5px 0; font-family:inherit; }
-  .chipbtn.on { background:#8E2C48; color:#fff; border-color:#8E2C48; }
-  .tbl { width:100%; border-collapse:collapse; font-size:13.5px; }
-  .tbl th { text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.05em; color:#7A8C81; padding:6px 8px; border-bottom:2px solid #E2EAE3; }
-  .tbl td { padding:9px 8px; border-bottom:1px solid #EEF3EE; }
-  .tbl tr:hover td { background:#F7FAF7; }
-  @media (max-width: 820px) {
-    .app { flex-direction:column !important; }
-    .nav { width:auto !important; height:auto !important; position:static !important;
-           flex-direction:row !important; flex-wrap:wrap !important; gap:4px !important; }
-    .nav .navbtn { width:auto !important; }
-    .main { padding:16px !important; max-width:none !important; }
-    /* 16px inputs stop mobile browsers auto-zooming on focus */
-    .input { font-size:16px; }
-    /* inline grids are 2- or 4-column; collapse them all on small screens */
-    [style*="grid-template-columns"] { grid-template-columns:1fr !important; }
-    /* let wide tables scroll horizontally instead of overflowing the panel */
-    .tbl { display:block; overflow-x:auto; white-space:nowrap; }
-  }
-`;
